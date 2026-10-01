@@ -63,12 +63,6 @@ export default function Hero() {
                 Coaching personal y profesional
               </p>
             </div>
-
-            {/* =================================================
-                H1
-                Importante:
-                siempre visible desde el primer paint.
-            ================================================== */}
             <h1
               className="
                 max-w-full

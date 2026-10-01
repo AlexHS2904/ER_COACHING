@@ -33,7 +33,6 @@ export default function AboutSection() {
         py-20 sm:py-24 lg:py-28
         md:fabric-background
       "
-      style={{ contain: "paint" }}
     >
       {/* Decoración compleja solo tablet/desktop */}
       <div className="hidden md:block">

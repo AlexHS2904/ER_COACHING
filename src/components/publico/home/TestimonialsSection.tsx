@@ -16,7 +16,6 @@ export default function TestimonialsSection() {
         bg-brand-wine
         py-20 sm:py-24 lg:py-28
       "
-      style={{ contain: "paint" }}
     >
       {/* Textura: tablet/desktop solamente */}
       <div
@@ -94,7 +93,6 @@ export default function TestimonialsSection() {
 
                 md:shadow-[0_18px_50px_rgba(0,0,0,0.14)]
               "
-              style={{ contain: "paint" }}
             >
               {/* Textura interna: solo tablet/desktop */}
               <div
