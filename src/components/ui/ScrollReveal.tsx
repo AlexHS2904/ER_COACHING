@@ -1,10 +1,10 @@
 "use client";
 
 import {
+  type CSSProperties,
   type ReactNode,
   useEffect,
   useRef,
-  useState,
 } from "react";
 
 type Direction = "up" | "left" | "right";
@@ -17,9 +17,9 @@ type ScrollRevealProps = {
 };
 
 const hiddenPosition: Record<Direction, string> = {
-  up: "translate-y-5",
-  left: "-translate-x-5",
-  right: "translate-x-5",
+  up: "translate-y-4",
+  left: "-translate-x-4",
+  right: "translate-x-4",
 };
 
 export default function ScrollReveal({
@@ -29,47 +29,85 @@ export default function ScrollReveal({
   delay = 0,
 }: ScrollRevealProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const element = ref.current;
 
     if (!element) return;
 
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+    const reducedMotionQuery = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    );
+
+    if (mobileQuery.matches || reducedMotionQuery.matches) {
+      element.dataset.visible = "true";
+      return;
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.unobserve(entry.target);
-        }
+        if (!entry.isIntersecting) return;
+
+        /*
+         * No usamos setState.
+         *
+         * Cambiamos únicamente un atributo del DOM,
+         * evitando un render adicional de React.
+         */
+        requestAnimationFrame(() => {
+          element.dataset.visible = "true";
+        });
+
+        observer.unobserve(element);
       },
       {
-        threshold: 0.5,
+        threshold: 0.01,
+        rootMargin: "0px 0px 15% 0px",
       },
     );
 
     observer.observe(element);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+    };
   }, []);
 
   return (
     <div
       ref={ref}
-      style={{
-        transitionDelay: `${delay}ms`,
-      }}
+      data-visible="false"
+      style={
+        {
+          "--reveal-delay": `${delay}ms`,
+        } as CSSProperties
+      }
       className={`
-        transition-all duration-700
+        ${hiddenPosition[direction]}
+
+        opacity-0
+
+        transition-[opacity,transform]
+        duration-[420ms]
         ease-[cubic-bezier(0.22,1,0.36,1)]
-        motion-reduce:transform-none
+
+        [transition-delay:var(--reveal-delay)]
+
+        data-[visible=true]:translate-x-0
+        data-[visible=true]:translate-y-0
+        data-[visible=true]:opacity-100
+
+        max-md:translate-x-0
+        max-md:translate-y-0
+        max-md:opacity-100
+        max-md:transition-none
+
+        motion-reduce:translate-x-0
+        motion-reduce:translate-y-0
         motion-reduce:opacity-100
         motion-reduce:transition-none
-        ${
-          visible
-            ? "translate-x-0 translate-y-0 opacity-100"
-            : `opacity-0 ${hiddenPosition[direction]}`
-        }
+
         ${className}
       `}
     >
