@@ -8,7 +8,7 @@ const links = [
   { href: "/sobre-mi", label: "Sobre mí" },
   { href: "/servicios", label: "Servicios" },
   { href: "/testimonios", label: "Testimonios" },
-  { href: "/preguntas-frecuentes", label: "Preguntas frecuentes" },
+  { href: "/recursos", label: "Recursos" },
   { href: "/contacto", label: "Contacto" },
 ];
 
