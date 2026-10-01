@@ -1,62 +1,36 @@
 import Link from "next/link";
 
+import MobileMenu from "@/components/publico/MobileMenu";
+import NavLinks from "@/components/publico/NavLinks";
+
 export default function Header() {
   return (
-    <header className="border-b border-neutral-200 bg-white">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+    <header className="sticky top-0 z-50 border-b border-brand-taupe/30 bg-brand-cream/95 backdrop-blur-md">
+      <div className="mx-auto flex h-[72px] max-w-[1450px] items-center justify-between px-5 sm:h-20 sm:px-8 lg:px-12">
+        {/* LOGO */}
         <Link
           href="/"
-          className="text-xl font-semibold tracking-tight text-neutral-900"
+          aria-label="Ir al inicio"
+          className="animate-header-item font-display text-5xl leading-none text-brand-brown sm:text-6xl"
         >
-          Coaching
+          A<span className="text-brand-wine">.</span>
         </Link>
 
-        <nav
-          aria-label="Navegación principal"
-          className="hidden items-center gap-8 md:flex"
-        >
-          <Link
-            href="/sobre-mi"
-            className="text-sm text-neutral-700 transition hover:text-neutral-950"
-          >
-            Sobre mí
-          </Link>
+        {/* DESKTOP NAV */}
+        <div className="animate-header-item hidden lg:block">
+          <NavLinks />
+        </div>
 
+        {/* ACCIONES */}
+        <div className="flex items-center gap-3">
           <Link
             href="/servicios"
-            className="text-sm text-neutral-700 transition hover:text-neutral-950"
+            className="animate-header-item hidden rounded-xl bg-brand-wine px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-brown sm:inline-flex lg:px-6"
           >
-            Servicios
+            Agendar una cita
           </Link>
-
-          <Link
-            href="/recursos"
-            className="text-sm text-neutral-700 transition hover:text-neutral-950"
-          >
-            Recursos
-          </Link>
-
-          <Link
-            href="/testimonios"
-            className="text-sm text-neutral-700 transition hover:text-neutral-950"
-          >
-            Testimonios
-          </Link>
-
-          <Link
-            href="/contacto"
-            className="text-sm text-neutral-700 transition hover:text-neutral-950"
-          >
-            Contacto
-          </Link>
-        </nav>
-
-        <Link
-          href="/servicios"
-          className="rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700"
-        >
-          Reservar
-        </Link>
+          <MobileMenu />
+        </div>
       </div>
     </header>
   );

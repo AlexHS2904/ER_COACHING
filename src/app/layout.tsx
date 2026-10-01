@@ -1,9 +1,39 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import {
+  Cormorant_Garamond,
+  Montserrat,
+  Bodoni_Moda,
+  Tangerine,
+} from "next/font/google";
+
 import "./globals.css";
 
-const geist = Geist({
+const montserrat = Montserrat({
   subsets: ["latin"],
+  variable: "--font-montserrat",
+  display: "swap",
+});
+
+const cormorant = Cormorant_Garamond({
+  subsets: ["latin"],
+  variable: "--font-cormorant",
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const bodoni = Bodoni_Moda({
+  subsets: ["latin"],
+  variable: "--font-bodoni",
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const tangerine = Tangerine({
+  subsets: ["latin"],
+  variable: "--font-script",
+  weight: ["400", "700"],
   display: "swap",
 });
 
@@ -13,7 +43,7 @@ export const metadata: Metadata = {
     template: "%s | Coaching",
   },
   description:
-    "Servicios de coaching, acompañamiento personalizado y recursos para tu desarrollo personal.",
+    "Coaching personal y profesional para ayudarte a ganar claridad, tomar acción y avanzar con confianza.",
 };
 
 export default function RootLayout({
@@ -23,7 +53,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es-MX">
-      <body className={geist.className}>{children}</body>
+      <body
+        className={`
+          ${montserrat.variable}
+          ${cormorant.variable}
+          ${bodoni.variable}
+          ${tangerine.variable}
+        `}
+      >
+        {children}
+      </body>
     </html>
   );
 }
