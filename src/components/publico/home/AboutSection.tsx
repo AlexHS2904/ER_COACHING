@@ -26,17 +26,27 @@ const values = [
 
 export default function AboutSection() {
   return (
-    <section className="fabric-background relative overflow-hidden py-20 sm:py-24 lg:py-28">
-      <FabricDecor variant="alternate" />
-      {/* Separador superior */}
+    <section
+      className="
+        relative overflow-hidden
+        bg-brand-cream
+        py-20 sm:py-24 lg:py-28
+        md:fabric-background
+      "
+      style={{ contain: "paint" }}
+    >
+      {/* Decoración compleja solo tablet/desktop */}
+      <div className="hidden md:block">
+        <FabricDecor variant="alternate" />
+      </div>
+
+      {/* Separador */}
       <div
         aria-hidden="true"
         className="absolute inset-x-0 top-0 h-px bg-brand-taupe/30"
       />
 
-      {/* =========================
-          ESQUINA VERDE SUPERIOR IZQUIERDA
-      ========================== */}
+      {/* Verde superior */}
       <div
         aria-hidden="true"
         className="
@@ -48,34 +58,53 @@ export default function AboutSection() {
         "
       />
 
-      {/* puntito verde */}
       <div
         aria-hidden="true"
         className="
           pointer-events-none absolute
           left-8 top-10
-          h-2.5 w-2.5 rounded-full bg-brand-green
+          h-2.5 w-2.5
+          rounded-full bg-brand-green
           sm:left-11 sm:top-11
         "
       />
 
-      {/* decoraciones suaves */}
+      {/* Efectos blur: solo desktop/tablet */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-[58%] top-[55%] h-56 w-56 rounded-full bg-brand-wine/5 blur-3xl"
+        className="
+          pointer-events-none absolute
+          left-[58%] top-[55%]
+          hidden h-56 w-56
+          rounded-full bg-brand-wine/5 blur-3xl
+          md:block
+        "
       />
 
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute right-[8%] top-[18%] h-32 w-32 rounded-full bg-brand-green/6 blur-3xl"
+        className="
+          pointer-events-none absolute
+          right-[8%] top-[18%]
+          hidden h-32 w-32
+          rounded-full bg-brand-green/6 blur-3xl
+          md:block
+        "
       />
 
+      {/* Este círculo es barato, puede quedarse */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-32 top-1/2 h-72 w-72 -translate-y-1/2 rounded-full border border-brand-taupe/25"
+        className="
+          pointer-events-none absolute
+          -right-32 top-1/2
+          h-72 w-72
+          -translate-y-1/2
+          rounded-full
+          border border-brand-taupe/25
+        "
       />
 
-      {/* CONTENIDO */}
       <div className="relative z-10 mx-auto max-w-[1450px] px-5 sm:px-8 lg:px-12">
         <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-24">
           {/* IZQUIERDA */}
@@ -83,10 +112,12 @@ export default function AboutSection() {
             direction="left"
             className="lg:flex lg:min-h-[520px] lg:items-center"
           >
-            {/* más espacio arriba en mobile */}
             <div className="pt-10 sm:pt-12 lg:pt-0">
               <div className="mb-5 flex items-center gap-4">
-                <span className="h-0.5 w-12 bg-brand-wine" />
+                <span
+                  aria-hidden="true"
+                  className="h-0.5 w-12 bg-brand-wine"
+                />
 
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-black sm:text-sm">
                   Sobre mí
@@ -124,10 +155,12 @@ export default function AboutSection() {
                   className="
                     mt-7 inline-flex items-center gap-7
                     rounded-xl border border-brand-wine
-                    px-7 py-3.5 font-medium text-brand-wine
-                    transition-all duration-300
-                    hover:-translate-y-0.5
+                    px-7 py-3.5
+                    font-medium text-brand-wine
+                    transition-colors duration-200
                     hover:bg-brand-wine hover:text-white
+                    md:transition-[color,background-color,transform]
+                    md:hover:-translate-y-0.5
                   "
                 >
                   Conocer más sobre mí
@@ -139,11 +172,13 @@ export default function AboutSection() {
               </div>
             </ScrollReveal>
 
-            {/* BASE DEL ACOMPAÑAMIENTO */}
             <div className="mt-14 w-full">
               <ScrollReveal direction="up">
                 <div className="mb-5 flex items-center gap-3">
-                  <span className="h-px w-10 bg-brand-taupe/70" />
+                  <span
+                    aria-hidden="true"
+                    className="h-px w-10 bg-brand-taupe/70"
+                  />
 
                   <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-brand-brown/70">
                     Base del acompañamiento
@@ -156,18 +191,20 @@ export default function AboutSection() {
                   <ScrollReveal
                     key={value.title}
                     direction="up"
-                    delay={index * 100}
+                    delay={index * 60}
                     className="h-full"
                   >
                     <article
                       className="
                         h-full rounded-2xl
                         border border-brand-taupe/25
-                        bg-white/70 p-5
-                        shadow-[0_10px_30px_rgba(59,42,36,0.06)]
-                        transition-all duration-300
-                        hover:-translate-y-1
-                        hover:shadow-[0_16px_36px_rgba(59,42,36,0.10)]
+                        bg-white/80 p-5
+
+                        md:shadow-[0_10px_30px_rgba(59,42,36,0.06)]
+                        md:transition-[transform,box-shadow]
+                        md:duration-300
+                        md:hover:-translate-y-1
+                        md:hover:shadow-[0_16px_36px_rgba(59,42,36,0.10)]
                       "
                     >
                       <div

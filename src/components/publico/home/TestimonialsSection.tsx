@@ -10,44 +10,59 @@ export default function TestimonialsSection() {
   const publishedCount = testimonials.length;
 
   return (
-    <section className="relative overflow-hidden bg-brand-wine py-20 sm:py-24 lg:py-28">
-      {/* textura sutil */}
+    <section
+      className="
+        relative overflow-hidden
+        bg-brand-wine
+        py-20 sm:py-24 lg:py-28
+      "
+      style={{ contain: "paint" }}
+    >
+      {/* Textura: tablet/desktop solamente */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute inset-0 opacity-[0.08]
+          pointer-events-none absolute inset-0
+          hidden opacity-[0.08]
           bg-[radial-gradient(rgba(255,255,255,0.22)_0.7px,transparent_0.9px)]
           bg-[size:18px_18px]
+          md:block
         "
       />
 
-      {/* palabra decorativa al fondo */}
+      {/* Texto decorativo.
+          Lo quitamos en mobile para reducir rasterización */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute left-1/2 top-6 -translate-x-1/2
-          select-none whitespace-nowrap font-display
-          text-[5rem] font-semibold leading-none tracking-[-0.06em]
+          pointer-events-none absolute
+          left-1/2 top-6
+          hidden -translate-x-1/2
+          select-none whitespace-nowrap
+          font-display font-semibold
+          leading-none tracking-[-0.06em]
           text-white/[0.05]
-          sm:text-[7rem]
+          sm:block sm:text-[7rem]
           lg:text-[10rem]
         "
       >
         TESTIMONIOS
       </div>
 
-      {/* círculo decorativo sutil */}
+      {/* Círculo barato */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute -right-16 top-10
-          h-56 w-56 rounded-full border border-white/10
+          pointer-events-none absolute
+          -right-16 top-10
+          h-56 w-56
+          rounded-full
+          border border-white/10
           sm:h-72 sm:w-72
         "
       />
 
       <div className="relative z-10 mx-auto max-w-[1450px] px-5 sm:px-8 lg:px-12">
-        {/* heading breve */}
         <ScrollReveal direction="up">
           <div className="mx-auto max-w-[760px] text-center">
             <p className="text-[0.7rem] font-semibold uppercase tracking-[0.34em] text-brand-cream/70 sm:text-xs">
@@ -64,47 +79,48 @@ export default function TestimonialsSection() {
           </div>
         </ScrollReveal>
 
-        {/* cuadrado central */}
-        <ScrollReveal direction="up" delay={100}>
+        <ScrollReveal direction="up" delay={60}>
           <div className="mx-auto mt-12 max-w-[760px] lg:mt-14">
             <div
               className="
-                relative overflow-hidden rounded-[2rem]
-                border border-white/15 bg-brand-cream
-                shadow-[0_24px_70px_rgba(0,0,0,0.18)]
-                aspect-auto min-h-[420px]
+                relative overflow-hidden
+                rounded-[2rem]
+                border border-white/15
+                bg-brand-cream
+
+                min-h-[420px]
                 sm:min-h-[500px]
                 md:aspect-square md:min-h-0
+
+                md:shadow-[0_18px_50px_rgba(0,0,0,0.14)]
               "
+              style={{ contain: "paint" }}
             >
-              {/* textura interna */}
+              {/* Textura interna: solo tablet/desktop */}
               <div
                 aria-hidden="true"
                 className="
-                  pointer-events-none absolute inset-0 opacity-[0.06]
+                  pointer-events-none absolute inset-0
+                  hidden opacity-[0.06]
                   bg-[radial-gradient(rgba(59,42,36,0.16)_0.65px,transparent_0.9px)]
                   bg-[size:18px_18px]
+                  md:block
                 "
               />
 
-              {/* contenido interno */}
               <div className="relative flex h-full flex-col p-6 sm:p-8 lg:p-10">
-                {/* top bar */}
+                {/* TOP */}
                 <div className="flex items-start justify-between border-b border-brand-taupe/25 pb-5">
-                  <div>
-                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.3em] text-brand-brown/45">
-                      Archivo de experiencias
-                    </p>
-                  </div>
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.3em] text-brand-brown/45">
+                    Archivo de experiencias
+                  </p>
 
-                  <div className="text-right">
-                    <p className="font-display text-2xl italic text-brand-wine/55">
-                      {String(publishedCount).padStart(2, "0")}
-                    </p>
-                  </div>
+                  <p className="font-display text-2xl italic text-brand-wine/55">
+                    {String(publishedCount).padStart(2, "0")}
+                  </p>
                 </div>
 
-                {/* cuerpo */}
+                {/* CUERPO */}
                 <div className="flex flex-1 flex-col justify-center py-8 text-center sm:py-10">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-wine/75">
                     Próximamente
@@ -120,7 +136,7 @@ export default function TestimonialsSection() {
                   </p>
                 </div>
 
-                {/* footer */}
+                {/* FOOTER */}
                 <div className="flex items-center justify-between border-t border-brand-taupe/25 pt-5">
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full bg-brand-wine" />
@@ -129,13 +145,17 @@ export default function TestimonialsSection() {
                   </div>
                 </div>
 
-                {/* comilla decorativa */}
+                {/* Comilla, desktop/tablet */}
                 <div
                   aria-hidden="true"
                   className="
-                    pointer-events-none absolute right-8 top-24
-                    font-display text-7xl leading-none text-brand-taupe/18
-                    sm:text-8xl
+                    pointer-events-none absolute
+                    right-8 top-24
+                    hidden
+                    font-display
+                    text-7xl leading-none
+                    text-brand-taupe/18
+                    sm:block sm:text-8xl
                   "
                 >
                   ”
