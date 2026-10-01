@@ -1,6 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import FabricDecor from "@/components/ui/FabricDecor";
+
+
 const benefits = [
   {
     title: "Claridad",
@@ -21,7 +24,8 @@ const benefits = [
 
 export default function Hero() {
   return (
-    <section className="overflow-hidden bg-brand-cream lg:h-[calc(100dvh-80px)]">
+    <section className="overflow-hidden fabric-background lg:h-[calc(100dvh-80px)]">
+      <FabricDecor variant="soft" />
       <div className="grid h-full w-full lg:grid-cols-[1.02fr_0.98fr]">
         {/* =========================
             CONTENIDO IZQUIERDO

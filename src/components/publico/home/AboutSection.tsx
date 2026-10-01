@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import ScrollReveal from "@/components/ui/ScrollReveal";
+import FabricDecor from "@/components/ui/FabricDecor";
 
 const values = [
   {
@@ -25,7 +26,8 @@ const values = [
 
 export default function AboutSection() {
   return (
-    <section className="relative overflow-hidden bg-brand-cream py-20 sm:py-24 lg:py-28">
+    <section className="fabric-background relative overflow-hidden py-20 sm:py-24 lg:py-28">
+      <FabricDecor variant="alternate" />
       {/* Separador superior */}
       <div
         aria-hidden="true"
@@ -54,20 +56,6 @@ export default function AboutSection() {
           left-8 top-10
           h-2.5 w-2.5 rounded-full bg-brand-green
           sm:left-11 sm:top-11
-        "
-      />
-
-      {/* =========================
-          ESQUINA ROJA INFERIOR DERECHA
-      ========================== */}
-      <div
-        aria-hidden="true"
-        className="
-          pointer-events-none absolute
-          -bottom-28 -right-24
-          h-44 w-64 rounded-full
-          bg-brand-wine
-          sm:-bottom-32 sm:-right-28 sm:h-52 sm:w-90
         "
       />
 
