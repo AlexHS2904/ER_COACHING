@@ -1,264 +1,146 @@
 import ScrollReveal from "@/components/ui/ScrollReveal";
 
-export default function TestimonialsSection() {
-  return (
-    <section className="relative overflow-hidden bg-brand-wine py-20 sm:py-24 lg:py-32">
-      {/* =====================================================
-          TEXTURA / PROFUNDIDAD PROPIA DE ESTA SECCIÓN
-      ====================================================== */}
+const testimonials: {
+  id: string;
+  name: string;
+  text: string;
+}[] = [];
 
+export default function TestimonialsSection() {
+  const publishedCount = testimonials.length;
+
+  return (
+    <section className="relative overflow-hidden bg-brand-wine py-20 sm:py-24 lg:py-28">
+      {/* textura sutil */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute inset-0
-          bg-[radial-gradient(circle_at_18%_20%,rgba(255,255,255,0.08),transparent_28%),radial-gradient(circle_at_82%_78%,rgba(15,61,52,0.28),transparent_34%)]
+          pointer-events-none absolute inset-0 opacity-[0.08]
+          bg-[radial-gradient(rgba(255,255,255,0.22)_0.7px,transparent_0.9px)]
+          bg-[size:18px_18px]
         "
       />
 
-      {/* palabra gigante de fondo */}
+      {/* palabra decorativa al fondo */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute
-          -left-6 top-10
-          select-none
-          font-display
-          text-[8rem] font-semibold
-          leading-none
-          tracking-[-0.06em]
-          text-brand-cream/[0.035]
-          sm:text-[12rem]
-          lg:left-[-2rem]
-          lg:top-[-1rem]
-          lg:text-[19rem]
+          pointer-events-none absolute left-1/2 top-6 -translate-x-1/2
+          select-none whitespace-nowrap font-display
+          text-[5rem] font-semibold leading-none tracking-[-0.06em]
+          text-white/[0.05]
+          sm:text-[7rem]
+          lg:text-[10rem]
         "
       >
-        VOCES
+        TESTIMONIOS
       </div>
 
-      {/* círculo editorial */}
+      {/* círculo decorativo sutil */}
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute
-          -right-40 -top-40
-          h-[430px] w-[430px]
-          rounded-full
-          border border-brand-cream/10
+          pointer-events-none absolute -right-16 top-10
+          h-56 w-56 rounded-full border border-white/10
+          sm:h-72 sm:w-72
         "
       />
-
-      <div
-        aria-hidden="true"
-        className="
-          pointer-events-none absolute
-          -right-24 -top-24
-          h-[300px] w-[300px]
-          rounded-full
-          border border-brand-cream/10
-        "
-      />
-
-      {/* =====================================================
-          CONTENIDO
-      ====================================================== */}
 
       <div className="relative z-10 mx-auto max-w-[1450px] px-5 sm:px-8 lg:px-12">
-        {/* pequeño encabezado editorial */}
+        {/* heading breve */}
         <ScrollReveal direction="up">
-          <div className="flex items-center justify-between border-b border-brand-cream/15 pb-5">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-brand-cream/65 sm:text-xs">
+          <div className="mx-auto max-w-[760px] text-center">
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.34em] text-brand-cream/70 sm:text-xs">
               Testimonios
             </p>
 
-            <p className="hidden text-xs uppercase tracking-[0.18em] text-brand-cream/35 sm:block">
-              Experiencias reales · Publicadas con autorización
-            </p>
+            <h2 className="mt-5 font-display text-4xl font-semibold leading-[0.96] tracking-[-0.03em] text-brand-cream sm:text-5xl lg:text-[4rem]">
+              Un espacio para
+              <span className="font-accent italic text-[#d8b7b0]">
+                {" "}
+                voces reales
+              </span>
+            </h2>
           </div>
         </ScrollReveal>
 
-        {/* =====================================================
-            COMPOSICIÓN PRINCIPAL
-        ====================================================== */}
-
-        <div className="mt-14 grid gap-12 lg:mt-20 lg:grid-cols-[0.72fr_1.28fr] lg:items-center lg:gap-20">
-          {/* =================================================
-              IZQUIERDA
-          ================================================== */}
-
-          <ScrollReveal direction="left">
-            <div>
-              <div className="mb-8 font-display text-[7rem] leading-[0.5] text-brand-taupe sm:text-[9rem] lg:text-[11rem]">
-                “
-              </div>
-
-              <h2 className="max-w-[560px] font-display text-5xl font-semibold leading-[0.92] tracking-[-0.03em] text-brand-cream sm:text-6xl lg:text-[5rem]">
-                Historias reales,
-                <span className="block font-accent italic text-brand-taupe">
-                  de voces reales.
-                </span>
-              </h2>
-
-              <p className="mt-8 max-w-[470px] text-sm leading-7 text-brand-cream/65 sm:text-base sm:leading-8">
-                Cada experiencia que aparezca aquí habrá sido compartida de
-                forma voluntaria por una persona que decidió contar parte de su
-                proceso.
-              </p>
-            </div>
-          </ScrollReveal>
-
-          {/* =================================================
-              PAPEL / ESTADO VACÍO
-          ================================================== */}
-
-          <ScrollReveal direction="right">
-            <div className="relative mx-auto w-full max-w-[720px] lg:mr-0">
-              {/* hoja trasera 1 */}
+        {/* cuadrado central */}
+        <ScrollReveal direction="up" delay={100}>
+          <div className="mx-auto mt-12 max-w-[760px] lg:mt-14">
+            <div
+              className="
+                relative overflow-hidden rounded-[2rem]
+                border border-white/15 bg-brand-cream
+                shadow-[0_24px_70px_rgba(0,0,0,0.18)]
+                aspect-auto min-h-[420px]
+                sm:min-h-[500px]
+                md:aspect-square md:min-h-0
+              "
+            >
+              {/* textura interna */}
               <div
                 aria-hidden="true"
                 className="
-                  absolute
-                  left-4 top-5
-                  h-full w-[95%]
-                  rotate-[-2deg]
-                  rounded-[2rem]
-                  bg-brand-taupe/25
+                  pointer-events-none absolute inset-0 opacity-[0.06]
+                  bg-[radial-gradient(rgba(59,42,36,0.16)_0.65px,transparent_0.9px)]
+                  bg-[size:18px_18px]
                 "
               />
 
-              {/* hoja trasera 2 */}
-              <div
-                aria-hidden="true"
-                className="
-                  absolute
-                  right-2 top-4
-                  h-full w-[94%]
-                  rotate-[1.5deg]
-                  rounded-[2rem]
-                  border border-brand-cream/10
-                  bg-brand-green/35
-                "
-              />
+              {/* contenido interno */}
+              <div className="relative flex h-full flex-col p-6 sm:p-8 lg:p-10">
+                {/* top bar */}
+                <div className="flex items-start justify-between border-b border-brand-taupe/25 pb-5">
+                  <div>
+                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.3em] text-brand-brown/45">
+                      Archivo de experiencias
+                    </p>
+                  </div>
 
-              {/* hoja principal */}
-              <div
-                className="
-                  relative
-                  min-h-[430px]
-                  overflow-hidden
-                  rounded-[2rem]
-                  bg-[#f3efe8]
-                  px-7 py-9
-                  shadow-[0_30px_80px_rgba(9,7,6,0.28)]
-                  sm:min-h-[480px]
-                  sm:px-10 sm:py-11
-                  lg:px-12
-                "
-              >
-                {/* textura del papel */}
+                  <div className="text-right">
+                    <p className="font-display text-2xl italic text-brand-wine/55">
+                      {String(publishedCount).padStart(2, "0")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* cuerpo */}
+                <div className="flex flex-1 flex-col justify-center py-8 text-center sm:py-10">
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-wine/75">
+                    Próximamente
+                  </p>
+
+                  <h3 className="mx-auto mt-5 max-w-[520px] font-display text-4xl font-semibold leading-[1.02] tracking-[-0.025em] text-brand-brown sm:text-5xl">
+                    Este espacio se irá llenando de testimonios reales.
+                  </h3>
+
+                  <p className="mx-auto mt-6 max-w-[520px] text-sm leading-7 text-brand-brown/65 sm:text-base">
+                    Cuando las personas invitadas compartan su experiencia y la
+                    coach autorice su publicación, aparecerán aquí.
+                  </p>
+                </div>
+
+                {/* footer */}
+                <div className="flex items-center justify-between border-t border-brand-taupe/25 pt-5">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-brand-wine" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-brand-green" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-brand-taupe" />
+                  </div>
+                </div>
+
+                {/* comilla decorativa */}
                 <div
                   aria-hidden="true"
                   className="
-                    pointer-events-none absolute inset-0
-                    opacity-[0.22]
-                    bg-[radial-gradient(rgba(59,42,36,0.18)_0.6px,transparent_0.8px)]
-                    bg-[size:17px_17px]
+                    pointer-events-none absolute right-8 top-24
+                    font-display text-7xl leading-none text-brand-taupe/18
+                    sm:text-8xl
                   "
-                />
-
-                {/* línea editorial superior */}
-                <div className="relative flex items-center justify-between border-b border-brand-brown/15 pb-5">
-                  <span className="text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-brand-brown/50">
-                    Archivo de experiencias
-                  </span>
-
-                  <span className="font-display text-2xl italic text-brand-wine/50">
-                    00
-                  </span>
-                </div>
-
-                {/* centro */}
-                <div className="relative flex min-h-[300px] flex-col justify-center py-10 sm:min-h-[330px]">
-                  <span
-                    aria-hidden="true"
-                    className="
-                      absolute
-                      right-0 top-8
-                      font-display
-                      text-[8rem]
-                      leading-none
-                      text-brand-wine/[0.07]
-                      sm:text-[10rem]
-                    "
-                  >
-                    ”
-                  </span>
-
-                  <div className="relative max-w-[520px]">
-                    <p className="mb-5 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-brand-wine">
-                      Próximamente
-                    </p>
-
-                    <h3 className="font-display text-[2.6rem] font-semibold leading-[0.98] text-brand-brown sm:text-[3.4rem]">
-                      Este espacio se irá llenando de voces reales.
-                    </h3>
-
-                    <p className="mt-6 max-w-[470px] text-sm leading-7 text-brand-brown/65 sm:text-base">
-                      Los testimonios aparecerán aquí cuando las personas
-                      invitadas compartan su experiencia y autoricen su
-                      publicación.
-                    </p>
-                  </div>
-                </div>
-
-                {/* pie tipo revista */}
-                <div className="relative flex items-end justify-between border-t border-brand-brown/15 pt-5">
-                  <div>
-                    <p className="text-[0.6rem] font-semibold uppercase tracking-[0.24em] text-brand-brown/45">
-                      Edna Rojo Coaching
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-brand-wine" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-brand-green" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-brand-taupe" />
-                  </div>
+                >
+                  ”
                 </div>
               </div>
-            </div>
-          </ScrollReveal>
-        </div>
-
-        {/* =====================================================
-            BANDA INFERIOR
-        ====================================================== */}
-
-        <ScrollReveal direction="up">
-          <div className="mt-16 overflow-hidden border-y border-brand-cream/10 py-4 lg:mt-24">
-            <div
-              className="
-                flex
-                justify-center
-                gap-5
-                whitespace-nowrap
-                text-[0.65rem]
-                font-semibold uppercase
-                tracking-[0.28em]
-                text-brand-cream/35
-                sm:gap-8
-              "
-            >
-              <span>Escuchar</span>
-              <span className="text-brand-taupe">✦</span>
-
-              <span>Compartir</span>
-              <span className="text-brand-taupe">✦</span>
-
-              <span>Reflexionar</span>
-              <span className="text-brand-taupe">✦</span>
-
-              <span>Avanzar</span>
             </div>
           </div>
         </ScrollReveal>

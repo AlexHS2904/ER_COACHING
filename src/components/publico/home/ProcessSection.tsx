@@ -32,12 +32,11 @@ export default function ProcessSection() {
   return (
     <section className="fabric-background relative overflow-hidden py-20 sm:py-24 lg:py-28">
       {/* =====================================================
-          DECORACIÓN DE FONDO
+          FONDO
       ====================================================== */}
 
-      <FabricDecor/>
+      <FabricDecor />
 
-      {/* círculos muy sutiles adicionales */}
       <div
         aria-hidden="true"
         className="
@@ -67,23 +66,23 @@ export default function ProcessSection() {
 
       <div className="relative z-10 mx-auto max-w-[1450px] px-5 sm:px-8 lg:px-12">
         {/* =====================================================
-            CABECERA
+            TÍTULO
         ====================================================== */}
 
-        <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-end lg:gap-20">
-          {/* izquierda */}
-
-          <ScrollReveal direction="left">
-            <div>
-              <div className="mb-5 flex items-center gap-4">
+        <div className="text-center">
+          <ScrollReveal direction="up">
+            <div className="mx-auto">
+              <div className="mb-5 flex items-center justify-center gap-4">
                 <span className="h-0.5 w-12 bg-brand-wine" />
 
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-black sm:text-sm">
                   Cómo funciona
                 </p>
+
+                <span className="h-0.5 w-12 bg-brand-wine" />
               </div>
 
-              <h2 className="max-w-[650px] font-display text-5xl font-semibold leading-[0.95] tracking-[-0.02em] text-brand-brown sm:text-6xl lg:text-[4.5rem]">
+              <h2 className="mx-auto max-w-[700px] font-display text-5xl font-semibold leading-[0.95] tracking-[-0.02em] text-brand-brown sm:text-6xl lg:text-[4.5rem]">
                 Un proceso simple,{" "}
                 <span className="font-accent italic text-brand-wine">
                   pensado para ti.
@@ -91,87 +90,250 @@ export default function ProcessSection() {
               </h2>
             </div>
           </ScrollReveal>
-
-          {/* derecha */}
-
-          <ScrollReveal direction="right">
-            <div className="lg:max-w-[650px]">
-              <p className="text-base leading-8 text-brand-black/75 sm:text-lg">
-                No necesitas tener todo claro antes de comenzar. El proceso se
-                construye a partir de tu realidad, tus objetivos y tu propio
-                ritmo.
-              </p>
-
-              <div className="mt-5 flex items-center gap-3">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-brand-green" />
-
-                <p className="text-sm font-medium text-brand-brown/65">
-                  Claridad · Reflexión · Acción
-                </p>
-              </div>
-            </div>
-          </ScrollReveal>
         </div>
 
         {/* =====================================================
-            DESKTOP — TIMELINE HORIZONTAL
+            DESKTOP
         ====================================================== */}
 
         <div className="relative mt-20 hidden lg:block">
-          {/* línea */}
-          <div
-            aria-hidden="true"
-            className="
-              absolute
-              left-[16.666%] right-[16.666%]
-              top-8
-              h-px
-              bg-brand-taupe/45
-            "
-          />
+          {/* =========================================
+              NODOS + LÍNEA
+          ========================================== */}
 
-          <div className="grid grid-cols-3 gap-16">
+          <div className="relative">
+            {/* línea base */}
+            <div
+              aria-hidden="true"
+              className="
+                absolute
+                left-[16.666%]
+                right-[16.666%]
+                top-8
+                h-px
+                bg-brand-taupe/35
+              "
+            />
+
+            {/* línea que recorre el proceso */}
+            <div
+              aria-hidden="true"
+              className="
+                process-line-animated
+                absolute
+                left-[16.666%]
+                right-[16.666%]
+                top-[30px]
+                h-[3px]
+                rounded-full
+                bg-gradient-to-r
+                from-brand-wine
+                via-brand-green
+                to-brand-taupe
+              "
+            />
+
+            {/* puntos */}
+            <div className="relative grid grid-cols-3 gap-16">
+              {steps.map((step, index) => (
+                <ScrollReveal
+                  key={step.number}
+                  direction="up"
+                  delay={index * 120}
+                >
+                  <div className="flex justify-center">
+                    <div
+                      className={`
+                        process-node-${index + 1}
+                        relative z-10
+                        flex h-16 w-16
+                        items-center justify-center
+                        rounded-full
+                        shadow-[0_10px_30px_rgba(59,42,36,0.14)]
+                        ${step.circle}
+                      `}
+                    >
+                      {/* HALO */}
+                      <span
+                        aria-hidden="true"
+                        className="
+                          pointer-events-none
+                          absolute inset-[-9px]
+                          z-0
+                          rounded-full
+                          border-2 border-current
+                          opacity-30
+                        "
+                      />
+
+                      {/* número */}
+                      <span className="relative z-10 text-xs font-semibold tracking-[0.18em]">
+                        {step.number}
+                      </span>
+                    </div>
+                  </div>
+                </ScrollReveal>
+              ))}
+            </div>
+          </div>
+
+          {/* =========================================
+              TEXTOS
+          ========================================== */}
+
+          <div className="mt-8 grid grid-cols-3 gap-16">
+            {steps.map((step, index) => (
+              <ScrollReveal
+                key={`content-${step.number}`}
+                direction="up"
+                delay={index * 120 + 80}
+              >
+                <article className="mx-auto w-full max-w-[360px]">
+                  <p
+                    className={`
+                      mb-3
+                      text-[0.68rem]
+                      font-semibold uppercase
+                      tracking-[0.24em]
+                      ${step.accent}
+                    `}
+                  >
+                    Paso {step.number}
+                  </p>
+
+                  <h3 className="font-display text-[2.15rem] font-semibold leading-[1] text-brand-brown">
+                    {step.title}
+                  </h3>
+
+                  <p className="mt-5 text-base leading-7 text-brand-black/70">
+                    {step.description}
+                  </p>
+                </article>
+              </ScrollReveal>
+            ))}
+          </div>
+        </div>
+
+        {/* =====================================================
+            MOBILE / TABLET
+        ====================================================== */}
+
+        <div className="mt-14 lg:hidden">
+          <div className="space-y-12">
             {steps.map((step, index) => (
               <ScrollReveal
                 key={step.number}
                 direction="up"
-                delay={index * 120}
+                delay={index * 100}
               >
-                <article className="relative">
-                  {/* punto / número */}
-                  <div
-                    className={`
-                      relative z-10
-                      flex h-16 w-16
-                      items-center justify-center
-                      rounded-full
-                      shadow-[0_10px_30px_rgba(59,42,36,0.12)]
-                      ${step.circle}
-                    `}
-                  >
-                    <span className="text-xs font-semibold tracking-[0.18em]">
-                      {step.number}
-                    </span>
+                <article
+                  className="
+                    relative grid
+                    grid-cols-[56px_1fr]
+                    gap-6
+                    sm:gap-8
+                  "
+                >
+                  {/* =========================================
+                      COLUMNA DEL TIMELINE
+                  ========================================== */}
+
+                  <div className="relative flex justify-center">
+                    {/* línea hacia el siguiente punto */}
+                    {index < steps.length - 1 && (
+                      <>
+                        {/* base */}
+                        <div
+                          aria-hidden="true"
+                          className="
+                            absolute
+                            left-1/2
+                            top-7
+                            -bottom-[76px]
+                            w-px
+                            -translate-x-1/2
+                            bg-brand-taupe/35
+                          "
+                        />
+
+                        {/* línea animada */}
+                        <div
+                          aria-hidden="true"
+                          className={`
+                            process-mobile-segment
+                            process-mobile-segment-${index + 1}
+                            absolute
+                            left-1/2
+                            top-7
+                            -bottom-[76px]
+                            w-[3px]
+                            -translate-x-1/2
+                            rounded-full
+                            ${
+                              index === 0
+                                ? "bg-gradient-to-b from-brand-wine to-brand-green"
+                                : "bg-gradient-to-b from-brand-green to-brand-taupe"
+                            }
+                          `}
+                        />
+                      </>
+                    )}
+
+                    {/* nodo */}
+                    <div
+                      className={`
+                        process-node-${index + 1}
+                        relative z-10
+                        flex h-14 w-14
+                        shrink-0
+                        items-center justify-center
+                        rounded-full
+                        shadow-[0_8px_24px_rgba(59,42,36,0.14)]
+                        ${step.circle}
+                      `}
+                    >
+                      {/* HALO */}
+                      <span
+                        aria-hidden="true"
+                        className="
+                          pointer-events-none
+                          absolute inset-[-8px]
+                          z-0
+                          rounded-full
+                          border-2 border-current
+                          opacity-30
+                        "
+                      />
+
+                      {/* número */}
+                      <span className="relative z-10 text-[0.68rem] font-semibold tracking-[0.16em]">
+                        {step.number}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* contenido */}
-                  <div className="mt-8 max-w-[360px]">
+                  {/* =========================================
+                      TEXTO
+                  ========================================== */}
+
+                  <div className="pb-2 pt-1">
                     <p
                       className={`
-                        mb-3 text-[0.68rem]
+                        mb-2
+                        text-[0.65rem]
                         font-semibold uppercase
-                        tracking-[0.24em]
+                        tracking-[0.22em]
                         ${step.accent}
                       `}
                     >
                       Paso {step.number}
                     </p>
 
-                    <h3 className="font-display text-[2.15rem] font-semibold leading-[1] text-brand-brown">
+                    <h3 className="font-display text-[2rem] font-semibold leading-[1] text-brand-brown sm:text-[2.2rem]">
                       {step.title}
                     </h3>
 
-                    <p className="mt-5 text-sm leading-7 text-brand-black/70 sm:text-base">
+                    <p className="mt-4 max-w-xl text-sm leading-7 text-brand-black/70 sm:text-base">
                       {step.description}
                     </p>
                   </div>
@@ -180,103 +342,6 @@ export default function ProcessSection() {
             ))}
           </div>
         </div>
-
-        {/* =====================================================
-            MOBILE / TABLET — TIMELINE VERTICAL
-        ====================================================== */}
-
-        <div className="mt-14 lg:hidden">
-          <div className="relative">
-            {/* línea vertical */}
-            <div
-              aria-hidden="true"
-              className="
-                absolute
-                bottom-8 left-[27px] top-8
-                w-px
-                bg-brand-taupe/45
-              "
-            />
-
-            <div className="space-y-12">
-              {steps.map((step, index) => (
-                <ScrollReveal
-                  key={step.number}
-                  direction="up"
-                  delay={index * 100}
-                >
-                  <article className="relative flex gap-6 sm:gap-8">
-                    {/* número */}
-                    <div
-                      className={`
-                        relative z-10
-                        flex h-14 w-14
-                        shrink-0
-                        items-center justify-center
-                        rounded-full
-                        shadow-[0_8px_24px_rgba(59,42,36,0.12)]
-                        ${step.circle}
-                      `}
-                    >
-                      <span className="text-[0.68rem] font-semibold tracking-[0.16em]">
-                        {step.number}
-                      </span>
-                    </div>
-
-                    {/* texto */}
-                    <div className="pb-2 pt-1">
-                      <p
-                        className={`
-                          mb-2 text-[0.65rem]
-                          font-semibold uppercase
-                          tracking-[0.22em]
-                          ${step.accent}
-                        `}
-                      >
-                        Paso {step.number}
-                      </p>
-
-                      <h3 className="font-display text-[2rem] font-semibold leading-[1] text-brand-brown sm:text-[2.2rem]">
-                        {step.title}
-                      </h3>
-
-                      <p className="mt-4 max-w-xl text-sm leading-7 text-brand-black/70 sm:text-base">
-                        {step.description}
-                      </p>
-                    </div>
-                  </article>
-                </ScrollReveal>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* =====================================================
-            CIERRE SUTIL
-        ====================================================== */}
-
-        <ScrollReveal direction="up">
-          <div className="mt-16 flex justify-center lg:mt-20">
-            <div
-              className="
-                max-w-[760px]
-                rounded-[1.5rem]
-                border border-brand-taupe/20
-                bg-white/40
-                px-6 py-5
-                text-center
-                shadow-[0_12px_40px_rgba(59,42,36,0.05)]
-                backdrop-blur-[2px]
-                sm:px-9 sm:py-6
-              "
-            >
-              <p className="font-display text-xl leading-relaxed text-brand-brown sm:text-2xl">
-                Cada proceso es diferente. Lo importante es comenzar desde
-                donde hoy estás.
-              </p>
-            </div>
-          </div>
-        </ScrollReveal>
       </div>
     </section>
   );
