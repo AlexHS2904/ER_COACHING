@@ -3,15 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { navLinks } from "@/lib/routes";
 
-const links = [
-  { href: "/", label: "Inicio" },
-  { href: "/sobre-mi", label: "Sobre mí" },
-  { href: "/servicios", label: "Servicios" },
-  { href: "/testimonios", label: "Testimonios" },
-  { href: "/recursos", label: "Recursos" },
-  { href: "/contacto", label: "Contacto" },
-];
 
 export default function MobileMenu() {
   const [open, setOpen] = useState(false);
@@ -199,8 +192,11 @@ export default function MobileMenu() {
             aria-label="Navegación móvil"
             className="mt-14 flex flex-col"
           >
-            {links.map((link, index) => {
-              const isActive = pathname === link.href;
+            {navLinks.map((link, index) => {
+              const isActive =
+                link.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(link.href);
 
               return (
                 <Link
@@ -214,8 +210,10 @@ export default function MobileMenu() {
                     py-4
                     text-xl
                     font-medium
-                    transition-all
+
+                    transition-[color,transform,opacity,padding]
                     duration-300
+
                     hover:pl-2
                     hover:text-brand-taupe
 

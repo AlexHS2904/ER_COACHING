@@ -35,7 +35,7 @@ export default function ProcessSection() {
           FONDO
       ====================================================== */}
 
-      <FabricDecor />
+        <FabricDecor />
 
       <div
         aria-hidden="true"

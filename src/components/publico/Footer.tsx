@@ -1,31 +1,42 @@
 import Link from "next/link";
 
-const links = [
-  { label: "Sobre mí", href: "/sobre-mi" },
-  { label: "Servicios", href: "/servicios" },
-  { label: "Testimonios", href: "/testimonios" },
-  { label: "Contacto", href: "/contacto" },
+import { routes } from "@/lib/routes";
+
+const footerLinks = [
+  { label: "Sobre mí", href: routes.about },
+  { label: "Servicios", href: routes.services },
+  { label: "Testimonios", href: routes.testimonials },
+  { label: "Recursos", href: routes.resources },
+  { label: "Contacto", href: routes.contact },
 ];
 
 export default function Footer() {
   return (
     <footer className="relative overflow-hidden bg-[#e5d9d2] text-brand-brown">
-      {/* línea superior */}
-      <div className="h-[3px] w-full bg-brand-wine" />
+      {/* Línea superior */}
+      <div
+        aria-hidden="true"
+        className="h-[3px] w-full bg-brand-wine"
+      />
 
-      {/* textura muy leve */}
+      {/* Textura:
+          La dejamos únicamente desde tablet para evitar
+          rasterización innecesaria durante el scroll mobile. */}
       <div
         aria-hidden="true"
         className="
           pointer-events-none absolute inset-0
-          opacity-[0.07]
+          hidden opacity-[0.07]
           bg-[radial-gradient(rgba(59,42,36,0.18)_0.55px,transparent_0.8px)]
           bg-[size:20px_20px]
+          md:block
         "
       />
 
       <div className="relative z-10 mx-auto max-w-[1450px] px-5 sm:px-8 lg:px-12">
-        {/* parte principal */}
+        {/* ===============================================
+            PARTE PRINCIPAL
+        ================================================ */}
         <div
           className="
             flex flex-col gap-8
@@ -36,9 +47,13 @@ export default function Footer() {
             lg:justify-between
           "
         >
-          {/* logo + frase */}
+          {/* Logo + frase */}
           <div className="max-w-[390px]">
-            <Link href="/" className="inline-block">
+            <Link
+              href={routes.home}
+              aria-label="Ir al inicio"
+              className="inline-block"
+            >
               <span className="font-display text-5xl leading-none text-brand-wine">
                 A.
               </span>
@@ -49,7 +64,9 @@ export default function Footer() {
             </p>
           </div>
 
-          {/* navegación */}
+          {/* =============================================
+              NAVEGACIÓN
+          ============================================== */}
           <nav aria-label="Navegación del footer">
             <ul
               className="
@@ -58,11 +75,14 @@ export default function Footer() {
                 text-brand-brown/65
               "
             >
-              {links.map((link) => (
+              {footerLinks.map((link) => (
                 <li key={link.href}>
                   <Link
                     href={link.href}
-                    className="transition-colors duration-200 hover:text-brand-wine"
+                    className="
+                      transition-colors duration-200
+                      hover:text-brand-wine
+                    "
                   >
                     {link.label}
                   </Link>
@@ -71,9 +91,11 @@ export default function Footer() {
             </ul>
           </nav>
 
-          {/* CTA */}
+          {/* =============================================
+              CTA
+          ============================================== */}
           <Link
-            href="/servicios"
+            href={routes.booking}
             className="
               group inline-flex w-fit
               items-center gap-5
@@ -82,23 +104,32 @@ export default function Footer() {
               px-5 py-3
               text-sm font-semibold
               text-brand-cream
-              transition-all duration-300
-              hover:-translate-y-0.5
+
+              transition-[background-color,transform]
+              duration-300
+
               hover:bg-[#592129]
+
+              md:hover:-translate-y-0.5
             "
           >
             Agendar sesión
 
             <span
               aria-hidden="true"
-              className="transition-transform duration-300 group-hover:translate-x-1"
+              className="
+                transition-transform duration-300
+                group-hover:translate-x-1
+              "
             >
               →
             </span>
           </Link>
         </div>
 
-        {/* cierre */}
+        {/* ===============================================
+            CIERRE
+        ================================================ */}
         <div
           className="
             flex flex-col gap-3
