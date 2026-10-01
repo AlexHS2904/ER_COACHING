@@ -266,7 +266,7 @@ export default function Hero() {
                 src="/images/coach/coach1.webp"
                 alt="Coach profesional"
                 fill
-                fetchPriority="high"
+                preload
                 sizes="305px"
                 quality={80}
                 className="object-contain object-bottom"
