@@ -5,7 +5,7 @@ import NavLinks from "@/components/publico/NavLinks";
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 border-b border-brand-taupe/30 bg-brand-cream/95 backdrop-blur-md">
+    <header className="sticky top-0 z-50 border-b border-brand-taupe/30 bg-brand-cream">
       <div className="mx-auto flex h-[72px] max-w-[1450px] items-center justify-between px-5 sm:h-20 sm:px-8 lg:px-12">
         {/* LOGO */}
         <Link
