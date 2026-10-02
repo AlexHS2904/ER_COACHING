@@ -1,6 +1,6 @@
 import "server-only";
 
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export type AvailableSlot = {
   starts_at: string;
@@ -12,6 +12,8 @@ export async function getAvailableSlots(
   serviceSlug: string,
   date: string,
 ): Promise<AvailableSlot[]> {
+  const supabaseAdmin = getSupabaseAdmin();
+
   const { data, error } = await supabaseAdmin.rpc(
     "get_available_slots",
     {
@@ -21,7 +23,10 @@ export async function getAvailableSlots(
   );
 
   if (error) {
-    console.error("Error loading available slots:", error);
+    console.error(
+      "Error loading available slots:",
+      error,
+    );
 
     throw new Error(
       "No fue posible obtener los horarios disponibles.",
