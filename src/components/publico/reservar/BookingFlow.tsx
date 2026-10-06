@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 
+import { useRouter } from "next/navigation";
+
 import type { Service } from "@/lib/data/services";
 
 /* =========================================================
@@ -110,6 +112,9 @@ export default function BookingFlow({
   services,
   initialServiceSlug,
 }: BookingFlowProps) {
+    const router = useRouter();
+
+    
   /* =======================================================
      REF FORMULARIO
   ======================================================= */
@@ -518,26 +523,12 @@ const [
         );
         }
 
-        setBookingSuccess(data);
-
-        requestAnimationFrame(() => {
-        formSectionRef.current?.scrollIntoView(
-            {
-            behavior: "smooth",
-            block: "start",
-            },
+                router.replace(
+        `/reservar/confirmada?ref=${encodeURIComponent(
+            data.bookingReference,
+        )}`,
         );
-        });
 
-      /*
-        Después sustituiremos esto
-        por la pantalla final de:
-
-        - referencia
-        - Google Calendar
-        - Google Meet
-        - correo enviado
-      */
     } catch (error) {
       console.error(error);
 

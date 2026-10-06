@@ -6,6 +6,9 @@ import { google } from "googleapis";
 import { getGoogleOAuthClient } from "@/lib/google/oauth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+const GOOGLE_TIME_ZONE =
+  "America/Mexico_City";
+
 type CreateCalendarEventInput = {
   bookingReference: string;
   serviceName: string;
@@ -19,26 +22,28 @@ type CreateCalendarEventInput = {
   notes?: string | null;
 };
 
-export async function createGoogleCalendarEvent({
-  bookingReference,
-  serviceName,
-  customerName,
-  customerEmail,
-  startsAt,
-  endsAt,
-  notes,
-}: CreateCalendarEventInput) {
-  const supabase = getSupabaseAdmin();
+type UpdateCalendarEventInput = {
+  eventId: string;
 
-  /* =====================================================
-     OBTENER REFRESH TOKEN
-  ===================================================== */
+  startsAt: string;
+  endsAt: string;
+};
+
+/* =========================================================
+   CLIENTE DE GOOGLE CALENDAR
+========================================================= */
+
+async function getGoogleCalendarClient() {
+  const supabase =
+    getSupabaseAdmin();
 
   const {
     data: connection,
     error: connectionError,
   } = await supabase
-    .from("google_calendar_connection")
+    .from(
+      "google_calendar_connection",
+    )
     .select("refresh_token")
     .eq("id", 1)
     .single();
@@ -52,10 +57,6 @@ export async function createGoogleCalendarEvent({
     );
   }
 
-  /* =====================================================
-     AUTENTICAR
-  ===================================================== */
-
   const oauth2Client =
     getGoogleOAuthClient();
 
@@ -64,14 +65,27 @@ export async function createGoogleCalendarEvent({
       connection.refresh_token,
   });
 
-  const calendar = google.calendar({
+  return google.calendar({
     version: "v3",
     auth: oauth2Client,
   });
+}
 
-  /* =====================================================
-     CREAR EVENTO + SOLICITAR GOOGLE MEET
-  ===================================================== */
+/* =========================================================
+   CREAR EVENTO
+========================================================= */
+
+export async function createGoogleCalendarEvent({
+  bookingReference,
+  serviceName,
+  customerName,
+  customerEmail,
+  startsAt,
+  endsAt,
+  notes,
+}: CreateCalendarEventInput) {
+  const calendar =
+    await getGoogleCalendarClient();
 
   const requestId =
     crypto.randomUUID();
@@ -80,7 +94,9 @@ export async function createGoogleCalendarEvent({
     `Reserva: ${bookingReference}`,
     `Cliente: ${customerName}`,
     `Correo: ${customerEmail}`,
-    notes ? `Notas: ${notes}` : null,
+    notes
+      ? `Notas: ${notes}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -94,25 +110,31 @@ export async function createGoogleCalendarEvent({
       sendUpdates: "all",
 
       requestBody: {
-        summary: `${serviceName} · ${customerName}`,
+        summary:
+          `${serviceName} · ${customerName}`,
 
         description,
 
         start: {
-          dateTime: startsAt,
+          dateTime:
+            startsAt,
+
           timeZone:
-            "America/Mexico_City",
+            GOOGLE_TIME_ZONE,
         },
 
         end: {
-          dateTime: endsAt,
+          dateTime:
+            endsAt,
+
           timeZone:
-            "America/Mexico_City",
+            GOOGLE_TIME_ZONE,
         },
 
         attendees: [
           {
-            email: customerEmail,
+            email:
+              customerEmail,
           },
         ],
 
@@ -121,7 +143,8 @@ export async function createGoogleCalendarEvent({
             requestId,
 
             conferenceSolutionKey: {
-              type: "hangoutsMeet",
+              type:
+                "hangoutsMeet",
             },
           },
         },
@@ -131,28 +154,158 @@ export async function createGoogleCalendarEvent({
   const event =
     response.data;
 
-  /* =====================================================
-     EXTRAER GOOGLE MEET
-  ===================================================== */
-
   const meetUrl =
-    event.conferenceData?.entryPoints?.find(
-      (entry) =>
-        entry.entryPointType ===
-        "video",
-    )?.uri ??
+    event.conferenceData
+      ?.entryPoints?.find(
+        (entry) =>
+          entry.entryPointType ===
+          "video",
+      )?.uri ??
     event.hangoutLink ??
     null;
 
   return {
-    eventId: event.id ?? null,
+    eventId:
+      event.id ?? null,
+
     calendarUrl:
-      event.htmlLink ?? null,
+      event.htmlLink ??
+      null,
+
     meetUrl,
 
     conferenceStatus:
       event.conferenceData
-        ?.createRequest?.status
-        ?.statusCode ?? null,
+        ?.createRequest
+        ?.status
+        ?.statusCode ??
+      null,
   };
+}
+
+/* =========================================================
+   REPROGRAMAR EVENTO
+========================================================= */
+
+export async function updateGoogleCalendarEvent({
+  eventId,
+  startsAt,
+  endsAt,
+}: UpdateCalendarEventInput) {
+  const calendar =
+    await getGoogleCalendarClient();
+
+  const response =
+    await calendar.events.patch({
+      calendarId: "primary",
+
+      eventId,
+      sendUpdates: "all",
+
+      requestBody: {
+        start: {
+          dateTime:
+            startsAt,
+
+          timeZone:
+            GOOGLE_TIME_ZONE,
+        },
+
+        end: {
+          dateTime:
+            endsAt,
+
+          timeZone:
+            GOOGLE_TIME_ZONE,
+        },
+      },
+    });
+
+  return {
+    eventId:
+      response.data.id ??
+      eventId,
+
+    calendarUrl:
+      response.data.htmlLink ??
+      null,
+
+    meetUrl:
+      response.data
+        .conferenceData
+        ?.entryPoints?.find(
+          (entry) =>
+            entry.entryPointType ===
+            "video",
+        )?.uri ??
+      response.data
+        .hangoutLink ??
+      null,
+  };
+}
+
+/* =========================================================
+   EXTRAER STATUS DE ERROR GOOGLE
+========================================================= */
+
+function getGoogleErrorStatus(
+  error: unknown,
+) {
+  if (
+    typeof error !==
+      "object" ||
+    error === null ||
+    !("response" in error)
+  ) {
+    return null;
+  }
+
+  const response = (
+    error as {
+      response?: {
+        status?: number;
+      };
+    }
+  ).response;
+
+  return (
+    response?.status ??
+    null
+  );
+}
+
+/* =========================================================
+   ELIMINAR EVENTO
+========================================================= */
+
+export async function deleteGoogleCalendarEvent(
+  eventId: string,
+) {
+  const calendar =
+    await getGoogleCalendarClient();
+
+  try {
+    await calendar.events.delete({
+      calendarId:
+        "primary",
+
+      eventId,
+
+      sendUpdates:
+        "all",
+    });
+  } catch (error) {
+    const status =
+      getGoogleErrorStatus(
+        error,
+      );
+    if (
+      status === 404 ||
+      status === 410
+    ) {
+      return;
+    }
+
+    throw error;
+  }
 }
