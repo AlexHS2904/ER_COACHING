@@ -35,13 +35,16 @@ export default async function ServicesSection() {
       name,
       slug,
       short_description,
+      description,
       service_type,
       duration_minutes,
       session_count,
       price,
       currency,
       requires_quote,
-      booking_enabled
+      booking_enabled,
+      active,
+      display_order
     `)
     .eq(
       "active",

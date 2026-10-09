@@ -11,6 +11,10 @@ import {
   routes,
 } from "@/lib/routes";
 
+import {
+  getQuoteWhatsAppUrl,
+} from "@/lib/whatsapp";
+
 export type HomeService = {
   id: string;
   name: string;
@@ -693,33 +697,89 @@ function ServiceCard({
       </div>
 
       <div className="self-end pt-8">
-        <Link
-          href={
-            routes.services
-          }
-          className="
-            inline-flex
-            items-center
-            gap-5
-            border-b
-            border-current
-            pb-1
-            text-sm
-            font-semibold
-            transition-all
-            duration-300
-            group-hover:gap-7
-          "
-        >
-          Ver detalles
+  {service.requires_quote ? (
+    <a
+      href={getQuoteWhatsAppUrl(
+        service.name,
+      )}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="
+        inline-flex
+        items-center
+        gap-5
+        border-b
+        border-current
+        pb-1
+        text-sm
+        font-semibold
+        transition-all
+        duration-300
+        group-hover:gap-7
+      "
+    >
+      Cotizar
 
-          <span
-            aria-hidden="true"
-          >
-            →
-          </span>
-        </Link>
-      </div>
+      <span
+        aria-hidden="true"
+      >
+        →
+      </span>
+    </a>
+  ) : service.booking_enabled ? (
+    <Link
+      href={`${routes.booking}?service=${encodeURIComponent(
+        service.slug,
+      )}`}
+      className="
+        inline-flex
+        items-center
+        gap-5
+        border-b
+        border-current
+        pb-1
+        text-sm
+        font-semibold
+        transition-all
+        duration-300
+        group-hover:gap-7
+      "
+    >
+      Agendar sesión
+
+      <span
+        aria-hidden="true"
+      >
+        →
+      </span>
+    </Link>
+  ) : (
+    <Link
+      href={routes.services}
+      className="
+        inline-flex
+        items-center
+        gap-5
+        border-b
+        border-current
+        pb-1
+        text-sm
+        font-semibold
+        transition-all
+        duration-300
+        group-hover:gap-7
+      "
+    >
+      Ver detalles
+
+      <span
+        aria-hidden="true"
+      >
+        →
+      </span>
+    </Link>
+  )}
+</div>
 
       <div
         aria-hidden="true"

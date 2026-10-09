@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import type { Service } from "@/lib/data/services";
 import { routes } from "@/lib/routes";
+import { getQuoteWhatsAppUrl } from "@/lib/whatsapp";
 
 type ServicesCatalogProps = {
   services: Service[];
@@ -222,7 +223,44 @@ export default function ServicesCatalog({
                       BOTÓN
                   ========================================== */}
 
-                  {service.booking_enabled ? (
+                  {service.requires_quote ? (
+                    <a
+                      href={getQuoteWhatsAppUrl(service.name)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`
+                        group
+                        mt-7
+                        flex
+                        min-h-[52px]
+                        w-full
+                        items-center
+                        justify-between
+                        rounded-xl
+                        border
+                        px-5
+                        text-sm
+                        font-semibold
+                        transition-colors
+                        duration-200
+                        ${accent.button}
+                      `}
+                    >
+                      <span>Solicitar cotización</span>
+
+                      <span
+                        aria-hidden="true"
+                        className="
+                          text-lg
+                          transition-transform
+                          duration-200
+                          group-hover:translate-x-1
+                        "
+                      >
+                        →
+                      </span>
+                    </a>
+                  ) : service.booking_enabled ? (
                     <Link
                       href={bookingHref}
                       className={`
@@ -278,7 +316,7 @@ export default function ServicesCatalog({
                         ${accent.button}
                       `}
                     >
-                      <span>Solicitar cotización</span>
+                      <span>Más información</span>
 
                       <span
                         aria-hidden="true"
