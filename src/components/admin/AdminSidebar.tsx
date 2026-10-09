@@ -5,12 +5,8 @@ import { usePathname } from "next/navigation";
 
 const navigation = [
   {
-    label: "Resumen",
-    href: "/admin",
-  },
-  {
-    label: "Reservas",
-    href: "/admin/reservas",
+    label: "Procesos",
+    href: "/admin/procesos",
   },
   {
     label: "Calendario",
@@ -23,6 +19,10 @@ const navigation = [
   {
     label: "Recursos",
     href: "/admin/recursos",
+  },
+  {
+    label: "Testimonios",
+    href: "/admin/testimonios",
   },
   {
     label: "Configuración",
@@ -38,15 +38,21 @@ function isActive(
     return pathname === "/admin";
   }
 
-  return pathname.startsWith(href);
+  return pathname.startsWith(
+    href,
+  );
 }
 
 export default function AdminSidebar() {
-  const pathname = usePathname();
+  const pathname =
+    usePathname();
 
   return (
     <>
-      {/* DESKTOP */}
+      {/* ===============================================
+          DESKTOP
+      ================================================ */}
+
       <aside
         className="
           fixed
@@ -62,7 +68,12 @@ export default function AdminSidebar() {
           lg:flex-col
         "
       >
-        <div className="px-7 pt-8">
+        <div
+          className="
+            px-7
+            pt-8
+          "
+        >
           <Link
             href="/admin"
             className="block"
@@ -93,8 +104,17 @@ export default function AdminSidebar() {
           </Link>
         </div>
 
-        <nav className="mt-12 px-4">
-          <div className="space-y-1.5">
+        <nav
+          className="
+            mt-12
+            px-4
+          "
+        >
+          <div
+            className="
+              space-y-1.5
+            "
+          >
             {navigation.map(
               (item) => {
                 const active =
@@ -105,8 +125,12 @@ export default function AdminSidebar() {
 
                 return (
                   <Link
-                    key={item.href}
-                    href={item.href}
+                    key={
+                      item.href
+                    }
+                    href={
+                      item.href
+                    }
                     className={`
                       flex
                       min-h-[48px]
@@ -116,6 +140,7 @@ export default function AdminSidebar() {
                       text-sm
                       font-semibold
                       transition
+
                       ${
                         active
                           ? "bg-brand-wine text-brand-cream"
@@ -123,7 +148,9 @@ export default function AdminSidebar() {
                       }
                     `}
                   >
-                    {item.label}
+                    {
+                      item.label
+                    }
                   </Link>
                 );
               },
@@ -131,7 +158,13 @@ export default function AdminSidebar() {
           </div>
         </nav>
 
-        <div className="mt-auto px-7 pb-8">
+        <div
+          className="
+            mt-auto
+            px-7
+            pb-8
+          "
+        >
           <p
             className="
               text-xs
@@ -146,7 +179,10 @@ export default function AdminSidebar() {
         </div>
       </aside>
 
-      {/* MOBILE / TABLET */}
+      {/* ===============================================
+          MOBILE / TABLET
+      ================================================ */}
+
       <div
         className="
           border-b
@@ -207,8 +243,12 @@ export default function AdminSidebar() {
 
               return (
                 <Link
-                  key={item.href}
-                  href={item.href}
+                  key={
+                    item.href
+                  }
+                  href={
+                    item.href
+                  }
                   className={`
                     shrink-0
                     rounded-full
@@ -217,6 +257,7 @@ export default function AdminSidebar() {
                     text-sm
                     font-semibold
                     transition
+
                     ${
                       active
                         ? "bg-brand-wine text-brand-cream"
@@ -224,7 +265,9 @@ export default function AdminSidebar() {
                     }
                   `}
                 >
-                  {item.label}
+                  {
+                    item.label
+                  }
                 </Link>
               );
             },
