@@ -3,7 +3,9 @@ import "server-only";
 import CustomerBookingEmail from "@/emails/CustomerBookingEmail";
 import CoachBookingEmail from "@/emails/CoachBookingEmail";
 
-import { getResend } from "@/lib/email/resend";
+import {
+  getResend,
+} from "@/lib/email/resend";
 
 type Input = {
   bookingId: string;
@@ -11,7 +13,9 @@ type Input = {
 
   customerName: string;
   customerEmail: string;
-  customerPhone: string | null;
+  customerPhone:
+    | string
+    | null;
 
   serviceName: string;
 
@@ -27,11 +31,47 @@ type Input = {
 
   currency: string;
 
-  notes: string | null;
+  notes:
+    | string
+    | null;
 
-  meetUrl: string | null;
-  calendarUrl: string | null;
+  meetUrl:
+    | string
+    | null;
+
+  calendarUrl:
+    | string
+    | null;
+
+  /*
+    Solo existe cuando la reserva
+    pertenece a un proceso de coaching.
+  */
+
+  processAccessUrl?:
+    | string
+    | null;
+
+  /*
+    Nos permite mostrar textos como:
+
+    "Incluido en tu proceso"
+
+    en lugar de:
+
+    "Por cotizar"
+
+    para las sesiones 2-6.
+  */
+
+  priceTextOverride?:
+    | string
+    | null;
 };
+
+/* =========================================================
+   FORMAT DATE
+========================================================= */
 
 function formatBookingDate(
   startsAt: string,
@@ -39,15 +79,31 @@ function formatBookingDate(
   return new Intl.DateTimeFormat(
     "es-MX",
     {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+      weekday:
+        "long",
+
+      day:
+        "numeric",
+
+      month:
+        "long",
+
+      year:
+        "numeric",
+
       timeZone:
         "America/Mexico_City",
     },
-  ).format(new Date(startsAt));
+  ).format(
+    new Date(
+      startsAt,
+    ),
+  );
 }
+
+/* =========================================================
+   FORMAT TIME
+========================================================= */
 
 function formatBookingTime(
   startsAt: string,
@@ -55,37 +111,70 @@ function formatBookingTime(
   return new Intl.DateTimeFormat(
     "es-MX",
     {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
+      hour:
+        "numeric",
+
+      minute:
+        "2-digit",
+
+      hour12:
+        true,
+
       timeZone:
         "America/Mexico_City",
     },
-  ).format(new Date(startsAt));
+  ).format(
+    new Date(
+      startsAt,
+    ),
+  );
 }
 
+/* =========================================================
+   FORMAT PRICE
+========================================================= */
+
 function formatPrice(
-  price: number | string | null,
+  price:
+    | number
+    | string
+    | null,
+
   currency: string,
 ) {
-  if (price === null) {
+  if (
+    price === null
+  ) {
     return "Por cotizar";
   }
 
   return new Intl.NumberFormat(
     "es-MX",
     {
-      style: "currency",
+      style:
+        "currency",
+
       currency,
-      maximumFractionDigits: 0,
+
+      maximumFractionDigits:
+        0,
     },
-  ).format(Number(price));
+  ).format(
+    Number(
+      price,
+    ),
+  );
 }
+
+/* =========================================================
+   SEND EMAILS
+========================================================= */
 
 export async function sendBookingEmails(
   input: Input,
 ) {
-  const resend = getResend();
+  const resend =
+    getResend();
 
   const from =
     process.env.RESEND_FROM_EMAIL;
@@ -105,6 +194,10 @@ export async function sendBookingEmails(
     );
   }
 
+  /* =======================================================
+     FORMAT VALUES
+  ======================================================= */
+
   const dateText =
     formatBookingDate(
       input.startsAt,
@@ -116,10 +209,15 @@ export async function sendBookingEmails(
     );
 
   const priceText =
+    input.priceTextOverride ??
     formatPrice(
       input.price,
       input.currency,
     );
+
+  /* =======================================================
+     COMMON EMAIL DATA
+  ======================================================= */
 
   const common = {
     serviceName:
@@ -143,89 +241,119 @@ export async function sendBookingEmails(
       input.meetUrl,
   };
 
+  /* =======================================================
+     SEND CUSTOMER + COACH
+  ======================================================= */
+
   const [
     customerResult,
     coachResult,
-  ] = await Promise.all([
-    resend.emails.send(
-      {
-        from,
+  ] =
+    await Promise.all([
+      /* ==========================
+         CUSTOMER
+      ========================== */
 
-        to:
-          input.customerEmail,
+      resend.emails.send(
+        {
+          from,
 
-        subject:
-          `Tu sesión está confirmada · ${input.bookingReference}`,
+          to:
+            input.customerEmail,
 
-        react:
-          CustomerBookingEmail({
-            ...common,
+          subject:
+            `Tu sesión está confirmada · ${input.bookingReference}`,
 
-            customerName:
-              input.customerName,
+          react:
+            CustomerBookingEmail(
+              {
+                ...common,
 
-            calendarUrl:
-              input.calendarUrl,
-          }),
-      },
-      {
-        idempotencyKey:
-          `booking/${input.bookingId}/customer`,
-      },
-    ),
+                customerName:
+                  input.customerName,
 
-    resend.emails.send(
-      {
-        from,
+                calendarUrl:
+                  input.calendarUrl,
 
-        to: coachEmail,
+                processAccessUrl:
+                  input.processAccessUrl ??
+                  null,
+              },
+            ),
+        },
+        {
+          idempotencyKey:
+            `booking/${input.bookingId}/customer`,
+        },
+      ),
 
-        subject:
-          `Nueva reserva · ${input.customerName}`,
+      /* ==========================
+         COACH
+      ========================== */
 
-        react:
-          CoachBookingEmail({
-            ...common,
+      resend.emails.send(
+        {
+          from,
 
-            customerName:
-              input.customerName,
+          to:
+            coachEmail,
 
-            customerEmail:
-              input.customerEmail,
+          subject:
+            `Nueva reserva · ${input.customerName}`,
 
-            customerPhone:
-              input.customerPhone,
+          react:
+            CoachBookingEmail(
+              {
+                ...common,
 
-            notes:
-              input.notes,
-          }),
-      },
-      {
-        idempotencyKey:
-          `booking/${input.bookingId}/coach`,
-      },
-    ),
-  ]);
+                customerName:
+                  input.customerName,
+
+                customerEmail:
+                  input.customerEmail,
+
+                customerPhone:
+                  input.customerPhone,
+
+                notes:
+                  input.notes,
+              },
+            ),
+        },
+        {
+          idempotencyKey:
+            `booking/${input.bookingId}/coach`,
+        },
+      ),
+    ]);
+
+  /* =======================================================
+     RESULT
+  ======================================================= */
 
   return {
     customer: {
       id:
-        customerResult.data?.id ??
+        customerResult.data
+          ?.id ??
         null,
 
       error:
         customerResult.error
-          ?.message ?? null,
+          ?.message ??
+        null,
     },
 
     coach: {
       id:
-        coachResult.data?.id ??
+        coachResult.data
+          ?.id ??
         null,
 
       error:
         coachResult.error
-          ?.message ?? null,
+          ?.message ??
+        null,
     },
   };
 }

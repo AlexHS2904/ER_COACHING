@@ -3,9 +3,10 @@ import {
   NextResponse,
 } from "next/server";
 
+import { createProcessAccess } from "@/lib/coaching/process-access";
+import { sendBookingEmails } from "@/lib/email/send-booking-emails";
 import { createGoogleCalendarEvent } from "@/lib/google/calendar";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { sendBookingEmails } from "@/lib/email/send-booking-emails";
 
 /* =========================================================
    TYPES
@@ -18,6 +19,14 @@ type BookingBody = {
   email?: unknown;
   phone?: unknown;
   notes?: unknown;
+};
+
+type BookingRpcResult = {
+  booking_id: string;
+  booking_reference: string;
+
+  process_id?: string | null;
+  process_reference?: string | null;
 };
 
 /* =========================================================
@@ -40,7 +49,23 @@ export async function POST(
   const supabase =
     getSupabaseAdmin();
 
+  /* =======================================================
+     IDS / ESTADO CREADO DURANTE LA OPERACIÓN
+  ======================================================= */
+
   let createdBookingId:
+    | string
+    | null = null;
+
+  let createdProcessId:
+    | string
+    | null = null;
+
+  let processReference:
+    | string
+    | null = null;
+
+  let processAccessToken:
     | string
     | null = null;
 
@@ -52,7 +77,42 @@ export async function POST(
 
     Un fallo de email NO debe cancelar la cita.
   */
-  let bookingConfirmed = false;
+
+  let bookingConfirmed =
+    false;
+
+  /* =======================================================
+     HELPER DE LIMPIEZA DEL PROCESO
+  ======================================================= */
+
+  async function cancelCreatedProcess() {
+    if (!createdProcessId) {
+      return;
+    }
+
+    const {
+      error:
+        processCancelError,
+    } = await supabase
+      .from(
+        "coaching_processes",
+      )
+      .update({
+        status:
+          "cancelled",
+      })
+      .eq(
+        "id",
+        createdProcessId,
+      );
+
+    if (processCancelError) {
+      console.error(
+        "Error cancelling coaching process:",
+        processCancelError,
+      );
+    }
+  }
 
   try {
     /* =====================================================
@@ -67,7 +127,8 @@ export async function POST(
     ===================================================== */
 
     if (
-      typeof body.service !== "string" ||
+      typeof body.service !==
+        "string" ||
       !body.service.trim()
     ) {
       return NextResponse.json(
@@ -86,7 +147,8 @@ export async function POST(
     ===================================================== */
 
     if (
-      typeof body.startsAt !== "string" ||
+      typeof body.startsAt !==
+        "string" ||
       !body.startsAt.trim()
     ) {
       return NextResponse.json(
@@ -101,7 +163,9 @@ export async function POST(
     }
 
     const startsAt =
-      new Date(body.startsAt);
+      new Date(
+        body.startsAt,
+      );
 
     if (
       Number.isNaN(
@@ -124,8 +188,10 @@ export async function POST(
     ===================================================== */
 
     if (
-      typeof body.name !== "string" ||
-      body.name.trim().length < 2
+      typeof body.name !==
+        "string" ||
+      body.name.trim().length <
+        2
     ) {
       return NextResponse.json(
         {
@@ -143,7 +209,8 @@ export async function POST(
     ===================================================== */
 
     if (
-      typeof body.email !== "string" ||
+      typeof body.email !==
+        "string" ||
       !isValidEmail(
         body.email.trim(),
       )
@@ -164,16 +231,20 @@ export async function POST(
     ===================================================== */
 
     const phone =
-      typeof body.phone === "string"
+      typeof body.phone ===
+      "string"
         ? body.phone.trim()
         : "";
 
     const notes =
-      typeof body.notes === "string"
+      typeof body.notes ===
+      "string"
         ? body.notes.trim()
         : "";
 
-    if (phone.length > 30) {
+    if (
+      phone.length > 30
+    ) {
       return NextResponse.json(
         {
           error:
@@ -185,7 +256,9 @@ export async function POST(
       );
     }
 
-    if (notes.length > 2000) {
+    if (
+      notes.length > 2000
+    ) {
       return NextResponse.json(
         {
           error:
@@ -198,41 +271,205 @@ export async function POST(
     }
 
     /* =====================================================
-       7. CREAR BOOKING EN SUPABASE
+       VALORES LIMPIOS
+    ===================================================== */
 
-       PostgreSQL vuelve a comprobar:
-       - servicio
-       - disponibilidad
-       - doble booking
+    const serviceSlug =
+      body.service.trim();
+
+    const customerName =
+      body.name.trim();
+
+    const customerEmail =
+      body.email
+        .trim()
+        .toLowerCase();
+
+    /* =====================================================
+       7. IDENTIFICAR TIPO DE SERVICIO
+
+       Esto NO sustituye las validaciones de PostgreSQL.
+
+       Solo determina qué RPC utilizamos:
+
+       single  → create_booking
+       package → create_package_booking
     ===================================================== */
 
     const {
-      data: bookingResult,
-      error: bookingError,
-    } = await supabase.rpc(
-      "create_booking",
-      {
-        p_service_slug:
-          body.service.trim(),
+      data: service,
+      error: serviceError,
+    } = await supabase
+      .from("services")
+      .select(
+        `
+          service_type,
+          booking_enabled,
+          requires_quote
+        `,
+      )
+      .eq(
+        "slug",
+        serviceSlug,
+      )
+      .eq(
+        "active",
+        true,
+      )
+      .maybeSingle();
 
-        p_starts_at:
-          startsAt.toISOString(),
+    if (
+      serviceError ||
+      !service
+    ) {
+      console.error(
+        "Error reading service:",
+        serviceError,
+      );
 
-        p_customer_name:
-          body.name.trim(),
+      return NextResponse.json(
+        {
+          error:
+            "El servicio seleccionado no está disponible.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
 
-        p_customer_email:
-          body.email
-            .trim()
-            .toLowerCase(),
+    if (
+      !service.booking_enabled ||
+      service.requires_quote
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "El servicio seleccionado no está disponible para reservar.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
 
-        p_customer_phone:
-          phone || null,
+    /* =====================================================
+       8. CREAR BOOKING / PROCESO
+    ===================================================== */
 
-        p_notes:
-          notes || null,
-      },
-    );
+    let bookingResult:
+      | BookingRpcResult[]
+      | null = null;
+
+    let bookingError:
+      | {
+          message: string;
+        }
+      | null = null;
+
+    /* =====================================================
+       PAQUETE
+    ===================================================== */
+
+    if (
+      service.service_type ===
+      "package"
+    ) {
+      /*
+        El token REAL vive únicamente en Next.js
+        y en el enlace que recibirá el cliente.
+
+        Supabase recibe solamente SHA-256(token).
+      */
+
+      const {
+        token,
+        tokenHash,
+      } =
+        createProcessAccess();
+
+      processAccessToken =
+        token;
+
+      const rpcResult =
+        await supabase.rpc(
+          "create_package_booking",
+          {
+            p_service_slug:
+              serviceSlug,
+
+            p_starts_at:
+              startsAt.toISOString(),
+
+            p_customer_name:
+              customerName,
+
+            p_customer_email:
+              customerEmail,
+
+            p_access_token_hash:
+              tokenHash,
+
+            p_customer_phone:
+              phone ||
+              null,
+
+            p_notes:
+              notes ||
+              null,
+          },
+        );
+
+      bookingResult =
+        rpcResult.data as
+          | BookingRpcResult[]
+          | null;
+
+      bookingError =
+        rpcResult.error;
+    } else {
+      /* ===================================================
+         RESERVA INDIVIDUAL
+      =================================================== */
+
+      const rpcResult =
+        await supabase.rpc(
+          "create_booking",
+          {
+            p_service_slug:
+              serviceSlug,
+
+            p_starts_at:
+              startsAt.toISOString(),
+
+            p_customer_name:
+              customerName,
+
+            p_customer_email:
+              customerEmail,
+
+            p_customer_phone:
+              phone ||
+              null,
+
+            p_notes:
+              notes ||
+              null,
+          },
+        );
+
+      bookingResult =
+        rpcResult.data as
+          | BookingRpcResult[]
+          | null;
+
+      bookingError =
+        rpcResult.error;
+    }
+
+    /* =====================================================
+       9. MANEJAR ERROR DE POSTGRESQL
+    ===================================================== */
 
     if (bookingError) {
       console.error(
@@ -280,13 +517,58 @@ export async function POST(
       );
     }
 
+    /* =====================================================
+       10. GUARDAR IDS CREADOS
+    ===================================================== */
+
     createdBookingId =
       result.booking_id;
 
+    if (
+      service.service_type ===
+      "package"
+    ) {
+      if (
+        !result.process_id ||
+        !result.process_reference
+      ) {
+        await supabase
+          .from("bookings")
+          .update({
+            status:
+              "cancelled",
+
+            integration_error:
+              "No fue posible recuperar el proceso de coaching.",
+          })
+          .eq(
+            "id",
+            createdBookingId,
+          );
+
+        return NextResponse.json(
+          {
+            error:
+              "No fue posible crear el proceso de coaching.",
+          },
+          {
+            status: 500,
+          },
+        );
+      }
+
+      createdProcessId =
+        result.process_id;
+
+      processReference =
+        result.process_reference;
+    }
+
     /* =====================================================
-       8. LEER BOOKING COMPLETO
+       11. LEER BOOKING COMPLETO
 
        IMPORTANTÍSIMO:
+
        usamos los snapshots guardados
        por PostgreSQL.
 
@@ -296,13 +578,17 @@ export async function POST(
 
     const {
       data: booking,
-      error: bookingReadError,
+      error:
+        bookingReadError,
     } = await supabase
       .from("bookings")
       .select(
         `
           id,
           booking_reference,
+
+          process_id,
+          package_session_number,
 
           service_name_snapshot,
           duration_minutes_snapshot,
@@ -339,7 +625,8 @@ export async function POST(
       await supabase
         .from("bookings")
         .update({
-          status: "cancelled",
+          status:
+            "cancelled",
 
           integration_error:
             "No fue posible recuperar la reserva después de crearla.",
@@ -348,6 +635,8 @@ export async function POST(
           "id",
           createdBookingId,
         );
+
+      await cancelCreatedProcess();
 
       return NextResponse.json(
         {
@@ -361,7 +650,7 @@ export async function POST(
     }
 
     /* =====================================================
-       9. CREAR GOOGLE CALENDAR + GOOGLE MEET
+       12. CREAR GOOGLE CALENDAR + GOOGLE MEET
     ===================================================== */
 
     let calendarResult;
@@ -392,25 +681,33 @@ export async function POST(
               booking.notes,
           },
         );
-    } catch (calendarError) {
+    } catch (
+      calendarError
+    ) {
       console.error(
         "Google Calendar error:",
         calendarError,
       );
 
       /*
-        Calendar sí es parte esencial
-        de nuestra reserva.
+        Calendar es parte esencial
+        de la reserva.
 
-        Si falla aquí:
-        → cancelamos booking
-        → horario vuelve a quedar libre.
+        Si falla:
+
+        booking → cancelled
+
+        y, si era la primera sesión
+        de un paquete:
+
+        coaching_process → cancelled
       */
 
       await supabase
         .from("bookings")
         .update({
-          status: "cancelled",
+          status:
+            "cancelled",
 
           calendar_status:
             "failed",
@@ -426,6 +723,8 @@ export async function POST(
           createdBookingId,
         );
 
+      await cancelCreatedProcess();
+
       return NextResponse.json(
         {
           error:
@@ -438,14 +737,16 @@ export async function POST(
     }
 
     /* =====================================================
-       10. GUARDAR CALENDAR + MEET
+       13. GUARDAR CALENDAR + MEET
 
-       Aquí la reserva pasa finalmente
-       de pending → confirmed.
+       Aquí la reserva pasa:
+
+       pending → confirmed
     ===================================================== */
 
     const {
-      error: calendarSaveError,
+      error:
+        calendarSaveError,
     } = await supabase
       .from("bookings")
       .update({
@@ -472,11 +773,23 @@ export async function POST(
         createdBookingId,
       );
 
-    if (calendarSaveError) {
+    if (
+      calendarSaveError
+    ) {
       console.error(
         "Error saving calendar data:",
         calendarSaveError,
       );
+
+      /*
+        Aquí NO cancelamos automáticamente.
+
+        El evento ya fue creado en Google Calendar.
+
+        Cancelar el booking sin eliminar primero
+        el evento podría dejar el calendario y
+        nuestra base de datos inconsistentes.
+      */
 
       return NextResponse.json(
         {
@@ -489,15 +802,17 @@ export async function POST(
       );
     }
 
-    bookingConfirmed = true;
+    bookingConfirmed =
+      true;
 
     /* =====================================================
-       11. ENVIAR LOS DOS CORREOS
+       14. ENVIAR LOS DOS CORREOS
 
        - ticket cliente
        - ticket coach
 
        IMPORTANTE:
+
        si un email falla, NO cancelamos
        la reserva.
 
@@ -506,63 +821,87 @@ export async function POST(
 
     let emailResult: {
       customer: {
-        id: string | null;
-        error: string | null;
+        id:
+          | string
+          | null;
+
+        error:
+          | string
+          | null;
       };
 
       coach: {
-        id: string | null;
-        error: string | null;
+        id:
+          | string
+          | null;
+
+        error:
+          | string
+          | null;
       };
     };
 
+    const processAccessUrl =
+        createdProcessId &&
+        processAccessToken
+            ? new URL(
+                `/proceso/${processAccessToken}`,
+                request.nextUrl.origin,
+            ).toString()
+            : null;
+
     try {
       emailResult =
-        await sendBookingEmails({
-          bookingId:
-            booking.id,
+        await sendBookingEmails(
+          {
+            
+            bookingId:
+              booking.id,
 
-          bookingReference:
-            booking.booking_reference,
+            bookingReference:
+              booking.booking_reference,
 
-          customerName:
-            booking.customer_name,
+            customerName:
+              booking.customer_name,
 
-          customerEmail:
-            booking.customer_email,
+            customerEmail:
+              booking.customer_email,
 
-          customerPhone:
-            booking.customer_phone,
+            customerPhone:
+              booking.customer_phone,
 
-          serviceName:
-            booking.service_name_snapshot,
+            serviceName:
+              booking.service_name_snapshot,
 
-          startsAt:
-            booking.starts_at,
+            startsAt:
+              booking.starts_at,
 
-          durationMinutes:
-            booking.duration_minutes_snapshot,
+            durationMinutes:
+              booking.duration_minutes_snapshot,
 
-          sessionCount:
-            booking.session_count_snapshot ??
-            1,
+            sessionCount:
+              booking.session_count_snapshot ??
+              1,
 
-          price:
-            booking.price_snapshot,
+            price:
+              booking.price_snapshot,
 
-          currency:
-            booking.currency_snapshot ??
-            "MXN",
+            currency:
+              booking.currency_snapshot ??
+              "MXN",
 
-          notes:
-            booking.notes,
+            notes:
+              booking.notes,
 
-          meetUrl:
-            calendarResult.meetUrl,
+            meetUrl:
+              calendarResult.meetUrl,
 
-          calendarUrl:
-            calendarResult.calendarUrl,
-        });
+            calendarUrl:
+              calendarResult.calendarUrl,
+
+            processAccessUrl,
+          },
+        );
     } catch (emailError) {
       console.error(
         "Email integration error:",
@@ -570,32 +909,35 @@ export async function POST(
       );
 
       const message =
-        emailError instanceof Error
+        emailError instanceof
+        Error
           ? emailError.message
           : "Error enviando correo.";
 
       emailResult = {
         customer: {
           id: null,
-          error: message,
+          error:
+            message,
         },
 
         coach: {
           id: null,
-          error: message,
+          error:
+            message,
         },
       };
     }
 
     /* =====================================================
-       12. GUARDAR ESTADO INICIAL DE EMAILS
+       15. GUARDAR ESTADO INICIAL DE EMAILS
 
        Aquí solo sabemos:
 
        sent   → Resend aceptó el email
        failed → ni siquiera pudo enviarse
 
-       delivered/bounced llegará después
+       delivered / bounced llegan después
        mediante webhook.
     ===================================================== */
 
@@ -603,7 +945,8 @@ export async function POST(
       new Date().toISOString();
 
     const {
-      error: emailSaveError,
+      error:
+        emailSaveError,
     } = await supabase
       .from("bookings")
       .update({
@@ -658,7 +1001,9 @@ export async function POST(
         createdBookingId,
       );
 
-    if (emailSaveError) {
+    if (
+      emailSaveError
+    ) {
       /*
         Esto NO cancela el booking.
 
@@ -673,7 +1018,7 @@ export async function POST(
     }
 
     /* =====================================================
-       13. RESPUESTA FINAL AL FRONTEND
+       16. RESPUESTA FINAL AL FRONTEND
     ===================================================== */
 
     return NextResponse.json(
@@ -685,6 +1030,29 @@ export async function POST(
 
         bookingReference:
           booking.booking_reference,
+
+        /*
+          Para una reserva normal:
+          process = null
+
+          Para un paquete:
+          enviamos el acceso privado.
+        */
+
+        process:
+          createdProcessId &&
+          processReference &&
+          processAccessToken
+            ? {
+                processId:
+                  createdProcessId,
+
+                processReference,
+
+                accessPath:
+                  `/proceso/${processAccessToken}`,
+              }
+            : null,
 
         status:
           "confirmed",
@@ -739,18 +1107,22 @@ export async function POST(
       status = confirmed
       calendar_status = created
 
-      un error posterior (ej. email)
-      jamás debe liberar el horario.
+      un error posterior jamás debe
+      liberar el horario.
     */
 
     if (
       createdBookingId &&
       !bookingConfirmed
     ) {
-      await supabase
+      const {
+        error:
+          bookingCancelError,
+      } = await supabase
         .from("bookings")
         .update({
-          status: "cancelled",
+          status:
+            "cancelled",
 
           integration_error:
             error instanceof Error
@@ -761,6 +1133,22 @@ export async function POST(
           "id",
           createdBookingId,
         );
+
+      if (
+        bookingCancelError
+      ) {
+        console.error(
+          "Error cancelling booking:",
+          bookingCancelError,
+        );
+      }
+    }
+
+    if (
+      createdProcessId &&
+      !bookingConfirmed
+    ) {
+      await cancelCreatedProcess();
     }
 
     return NextResponse.json(
