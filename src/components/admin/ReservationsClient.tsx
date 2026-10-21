@@ -1,5 +1,7 @@
 "use client";
 
+import BookingPaymentPanel from "@/components/admin/BookingPaymentPanel";
+
 import { useMemo, useState } from "react";
 
 import CancelBookingButton from "@/components/admin/CancelBookingButton";
@@ -9,6 +11,11 @@ import RescheduleBookingButton from "@/components/admin/RescheduleBookingButton"
 type Booking = {
   id: string;
   booking_reference: string | null;
+  payment_status: string;
+
+  paid_at:
+    | string
+    | null;
 
   customer_name: string;
   customer_email: string;
@@ -1135,6 +1142,21 @@ export default function ReservationsClient({
                   }
                 </p>
               </div>
+
+              <BookingPaymentPanel
+                bookingId={
+                  selectedBooking.id
+                }
+                serviceName={
+                  selectedBooking
+                    .service_name_snapshot
+                }
+                initialPaymentStatus={
+                  selectedBooking
+                    .payment_status ??
+                  "pending"
+                }
+              />
 
               <button
                 type="button"

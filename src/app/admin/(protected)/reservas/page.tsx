@@ -30,7 +30,11 @@ export default async function ReservasPage() {
         customer_email_status,
         coach_email_status,
         customer_email_error,
-        coach_email_error
+        coach_email_error,
+        payment_status,
+        paid_at,
+        payment_provider,
+        payment_reference
       `)
       .order("starts_at", {
         ascending: false,
