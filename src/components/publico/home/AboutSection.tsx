@@ -44,30 +44,7 @@ export default function AboutSection() {
         aria-hidden="true"
         className="absolute inset-x-0 top-0 h-px bg-brand-taupe/30"
       />
-
-      {/* Verde superior */}
-      <div
-        aria-hidden="true"
-        className="
-          pointer-events-none absolute
-          -left-24 -top-28
-          h-44 w-64 rounded-full
-          bg-brand-green
-          sm:-left-28 sm:-top-32 sm:h-50 sm:w-92
-        "
-      />
-
-      <div
-        aria-hidden="true"
-        className="
-          pointer-events-none absolute
-          left-8 top-10
-          h-2.5 w-2.5
-          rounded-full bg-brand-green
-          sm:left-11 sm:top-11
-        "
-      />
-
+      
       {/* Efectos blur: solo desktop/tablet */}
       <div
         aria-hidden="true"
@@ -111,7 +88,7 @@ export default function AboutSection() {
             direction="left"
             className="lg:flex lg:min-h-[520px] lg:items-center"
           >
-            <div className="pt-10 sm:pt-12 lg:pt-0">
+            <div className="pt-4 sm:pt-12 lg:pt-0">
               <div className="mb-5 flex items-center gap-4">
                 <span
                   aria-hidden="true"
