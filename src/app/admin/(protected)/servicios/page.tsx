@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import ServicesManager, {
   type AdminService,
 } from "@/components/admin/ServicesManager";
@@ -7,6 +9,8 @@ import {
 } from "@/lib/supabase/admin";
 
 export default async function AdminServicesPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

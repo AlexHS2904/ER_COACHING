@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import Link from "next/link";
 
 import {
@@ -273,6 +275,8 @@ function getBookingStatus(
 export default async function ProcessDetailPage({
   params,
 }: PageProps) {
+  await requireAdmin();
+
   const {
     id,
   } = await params;

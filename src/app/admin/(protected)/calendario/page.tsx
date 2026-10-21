@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import AdminCalendar from "@/components/admin/AdminCalendar";
 
 import {
@@ -49,6 +51,8 @@ function getCurrentMexicoYearMonth() {
 }
 
 export default async function CalendarioPage() {
+  await requireAdmin();
+
   const supabase =
     await createClient();
 

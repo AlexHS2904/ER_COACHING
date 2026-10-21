@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import Link from "next/link";
 
 import BookingCard from "@/components/admin/BookingCard";
@@ -183,6 +185,8 @@ function formatProcessDate(
 ========================================================= */
 
 export default async function AdminPage() {
+  await requireAdmin();
+
   const supabase =
     await createClient();
 

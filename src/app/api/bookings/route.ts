@@ -191,7 +191,9 @@ export async function POST(
       typeof body.name !==
         "string" ||
       body.name.trim().length <
-        2
+        2 ||
+      body.name.trim().length >
+        100
     ) {
       return NextResponse.json(
         {

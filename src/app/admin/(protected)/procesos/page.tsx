@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import Link from "next/link";
 
 import {
@@ -167,6 +169,8 @@ function getStatusInfo(
 ========================================================= */
 
 export default async function ProcessesPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

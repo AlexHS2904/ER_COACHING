@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import Link from "next/link";
 
 import AvailabilitySettings from "@/components/admin/AvailabilitySettings";
@@ -55,6 +57,8 @@ function getTodayKey() {
 }
 
 export default async function ConfiguracionPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

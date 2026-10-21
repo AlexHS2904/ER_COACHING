@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import ReservationsClient from "@/components/admin/ReservationsClient";
 
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ReservasPage() {
+  await requireAdmin();
+
   const supabase = await createClient();
 
   const { data: bookings, error } =

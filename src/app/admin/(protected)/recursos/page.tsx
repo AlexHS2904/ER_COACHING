@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import ResourcesManager, {
   type AdminResource,
 } from "@/components/admin/ResourcesManager";
@@ -7,6 +9,8 @@ import {
 } from "@/lib/supabase/admin";
 
 export default async function AdminResourcesPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import AdminTestimonialsClient from "@/components/admin/AdminTestimonialsClient";
 
 import {
@@ -8,6 +10,8 @@ export const dynamic =
   "force-dynamic";
 
 export default async function AdminTestimonialsPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

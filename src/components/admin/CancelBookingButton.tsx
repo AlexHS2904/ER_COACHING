@@ -58,7 +58,7 @@ export default function CancelBookingButton({
     try {
       const response =
         await fetch(
-          `/api/admin/bookings/${encodeURIComponent(
+          `/api/bookings/${encodeURIComponent(
             bookingId,
           )}/cancel`,
           {
@@ -66,8 +66,15 @@ export default function CancelBookingButton({
           },
         );
 
+      /*
+        Si el servidor responde algo que no es
+        JSON (por ejemplo una página de error),
+        mostramos el mensaje genérico.
+      */
       const data =
-        await response.json();
+        await response
+          .json()
+          .catch(() => null);
 
       if (
         !response.ok

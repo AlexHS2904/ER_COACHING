@@ -1,3 +1,5 @@
+import { requireAdmin } from "@/lib/admin/require-admin";
+
 import Link from "next/link";
 
 import {
@@ -177,6 +179,8 @@ function MultiAnswer({
 export default async function AdminIntakePage({
   params,
 }: Props) {
+  await requireAdmin();
+
   const {
     id,
   } = await params;
