@@ -1,24 +1,28 @@
-import {
-  redirect,
-} from "next/navigation";
 
-import {
-  createClient,
-} from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
+import { createClient } from "@/lib/supabase/server";
 import LoginForm from "./LoginForm";
 
 export default async function AdminLoginPage() {
-  const supabase =
-    await createClient();
+  const supabase = await createClient();
 
   const {
     data: claimsData,
-  } =
-    await supabase.auth.getClaims();
+  } = await supabase.auth.getClaims();
 
-  if (claimsData?.claims?.sub) {
-    redirect("/admin");
+  const userId = claimsData?.claims?.sub;
+
+  if (userId) {
+    const { data: admin } = await supabase
+      .from("admin_users")
+      .select("active")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (admin?.active) {
+      redirect("/admin");
+    }
   }
 
   return (
