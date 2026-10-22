@@ -11,56 +11,33 @@ import {
   getSupabaseAdmin,
 } from "@/lib/supabase/admin";
 
+import {
+  sendIntakeSubmissionEmail,
+} from "@/lib/email/send-intake-subimssion-mail";
+
+/* =========================================================
+   TYPES
+========================================================= */
+
 type Params = {
   params: Promise<{
     token: string;
   }>;
 };
 
-const occupations =
-  new Set([
-    "student",
-    "intern",
-    "graduate",
-    "employee",
-    "job_seeker",
-    "other",
-  ]);
+type IntakeBody =
+  Record<
+    string,
+    unknown
+  >;
 
-const challenges =
-  new Set([
-    "professional_clarity",
-    "vocational_doubts",
-    "fear_of_mistakes",
-    "insecurity",
-    "job_search",
-    "lack_of_direction",
-    "decision_making",
-    "self_knowledge",
-    "other",
-  ]);
-
-const durations =
-  new Set([
-    "less_than_month",
-    "one_to_six_months",
-    "more_than_six_months",
-    "unsure",
-  ]);
-
-const supports =
-  new Set([
-    "personal_reflection",
-    "practical_tools",
-    "decision_clarity",
-    "action_plan",
-    "limiting_beliefs",
-    "other",
-  ]);
+/* =========================================================
+   CLEANERS
+========================================================= */
 
 function cleanText(
   value: unknown,
-  max = 3000,
+  maxLength = 4000,
 ) {
   if (
     typeof value !==
@@ -69,44 +46,16 @@ function cleanText(
     return null;
   }
 
-  const trimmed =
+  const valueClean =
     value
       .trim()
       .slice(
         0,
-        max,
+        maxLength,
       );
 
-  return trimmed ||
+  return valueClean ||
     null;
-}
-
-function cleanArray(
-  value: unknown,
-  allowed: Set<string>,
-) {
-  if (
-    !Array.isArray(
-      value,
-    )
-  ) {
-    return [];
-  }
-
-  return [
-    ...new Set(
-      value.filter(
-        (
-          item,
-        ): item is string =>
-          typeof item ===
-            "string" &&
-          allowed.has(
-            item,
-          ),
-      ),
-    ),
-  ];
 }
 
 function cleanAge(
@@ -114,8 +63,8 @@ function cleanAge(
 ) {
   if (
     value === null ||
-    value === "" ||
-    value === undefined
+    value === undefined ||
+    value === ""
   ) {
     return null;
   }
@@ -138,43 +87,63 @@ function cleanAge(
   return age;
 }
 
-function mapAnswers(
-  body: Record<
-    string,
-    unknown
-  >,
+function cleanStringArray(
+  value: unknown,
 ) {
-  const occupation =
-    typeof body
-      .occupation ===
-      "string" &&
-    occupations.has(
-      body
-        .occupation,
+  if (
+    !Array.isArray(
+      value,
     )
-      ? body
-          .occupation
-      : null;
+  ) {
+    return [];
+  }
 
-  const challengeDuration =
-    typeof body
-      .challengeDuration ===
-      "string" &&
-    durations.has(
-      body
-        .challengeDuration,
-    )
-      ? body
-          .challengeDuration
-      : null;
+  return [
+    ...new Set(
+      value
+        .filter(
+          (
+            item,
+          ): item is string =>
+            typeof item ===
+            "string",
+        )
+        .map(
+          (
+            item,
+          ) =>
+            item
+              .trim()
+              .slice(
+                0,
+                300,
+              ),
+        )
+        .filter(
+          Boolean,
+        ),
+    ),
+  ];
+}
 
+/* =========================================================
+   MAP ANSWERS
+========================================================= */
+
+function mapAnswers(
+  body: IntakeBody,
+) {
   return {
     age:
       cleanAge(
         body.age,
       ),
 
-    occupation,
+    occupation:
+      cleanText(
+        body.occupation,
+        300,
+      ),
 
     current_situation:
       cleanText(
@@ -186,24 +155,26 @@ function mapAnswers(
       cleanText(
         body
           .discoverySource,
-        500,
+        1000,
       ),
 
     motivation:
       cleanText(
-        body
-          .motivation,
+        body.motivation,
       ),
 
     current_challenges:
-      cleanArray(
+      cleanStringArray(
         body
           .currentChallenges,
-        challenges,
       ),
 
     challenge_duration:
-      challengeDuration,
+      cleanText(
+        body
+          .challengeDuration,
+        300,
+      ),
 
     desired_outcome:
       cleanText(
@@ -225,8 +196,7 @@ function mapAnswers(
 
     strengths:
       cleanText(
-        body
-          .strengths,
+        body.strengths,
       ),
 
     main_concern:
@@ -242,10 +212,9 @@ function mapAnswers(
       ),
 
     support_preferences:
-      cleanArray(
+      cleanStringArray(
         body
           .supportPreferences,
-        supports,
       ),
 
     additional_notes:
@@ -255,6 +224,14 @@ function mapAnswers(
       ),
   };
 }
+
+/* =========================================================
+   ACCESS VALIDATION
+
+   Ya NO existe OTP.
+
+   El propio token privado es la credencial.
+========================================================= */
 
 async function validateAccess(
   token: string,
@@ -268,52 +245,164 @@ async function validateAccess(
     return {
       error:
         "Formulario no encontrado.",
+
       status:
         404,
+
       result:
         null,
     };
   }
 
+  const {
+    form,
+    booking,
+  } = result;
+
+  /* =====================================================
+     REVOKED
+  ===================================================== */
+
   if (
-    result.booking
-      .payment_status !==
-    "paid"
+    form.status ===
+    "revoked"
   ) {
     return {
       error:
-        "El formulario todavía no está disponible.",
+        "Este formulario ya no está disponible.",
+
       status:
-        403,
+        410,
+
       result:
         null,
     };
   }
 
+  /* =====================================================
+     EXPIRED
+  ===================================================== */
+
   if (
-    result.booking
-      .status ===
-    "cancelled"
+    form.expires_at &&
+    new Date(
+      form.expires_at,
+    ).getTime() <
+      Date.now()
   ) {
     return {
       error:
-        "Esta reserva fue cancelada.",
+        "Este enlace ha expirado.",
+
       status:
-        403,
+        410,
+
       result:
         null,
     };
   }
 
+  /* =====================================================
+     BOOKING
+  ===================================================== */
+
   if (
-    result.form
-      .submitted_at
+    form.source_type ===
+    "booking"
+  ) {
+    if (!booking) {
+      return {
+        error:
+          "No fue posible recuperar la reserva asociada.",
+
+        status:
+          404,
+
+        result:
+          null,
+      };
+    }
+
+    if (
+      booking.status ===
+      "cancelled"
+    ) {
+      return {
+        error:
+          "Esta reserva fue cancelada.",
+
+        status:
+          403,
+
+        result:
+          null,
+      };
+    }
+
+    if (
+      booking
+        .payment_status !==
+      "paid"
+    ) {
+      return {
+        error:
+          "El formulario todavía no está disponible.",
+
+        status:
+          403,
+
+        result:
+          null,
+      };
+    }
+  }
+
+  /* =====================================================
+     ALREADY SUBMITTED
+  ===================================================== */
+
+  if (
+    form.submitted_at ||
+    form.status ===
+      "submitted"
   ) {
     return {
       error:
         "Este formulario ya fue enviado.",
+
       status:
         409,
+
+      result:
+        null,
+    };
+  }
+
+  /* =====================================================
+     IDENTITY
+  ===================================================== */
+
+  const inviteeName =
+    form.invitee_name ??
+    booking?.customer_name ??
+    null;
+
+  const inviteeEmail =
+    form.invitee_email ??
+    booking?.customer_email ??
+    null;
+
+  if (
+    !inviteeName ||
+    !inviteeEmail
+  ) {
+    return {
+      error:
+        "El formulario no tiene un destinatario válido.",
+
+      status:
+        500,
+
       result:
         null,
     };
@@ -322,15 +411,23 @@ async function validateAccess(
   return {
     error:
       null,
+
     status:
       200,
-    result,
+
+    result: {
+      ...result,
+
+      inviteeName,
+
+      inviteeEmail,
+    },
   };
 }
 
-
 /* =========================================================
-   GUARDAR BORRADOR
+   PATCH
+   SAVE PROGRESS
 ========================================================= */
 
 export async function PATCH(
@@ -339,83 +436,123 @@ export async function PATCH(
     params,
   }: Params,
 ) {
-  const {
-    token,
-  } = await params;
-
-  const access =
-    await validateAccess(
+  try {
+    const {
       token,
-    );
+    } = await params;
 
-  if (
-    !access.result
+    const access =
+      await validateAccess(
+        token,
+      );
+
+    if (
+      !access.result
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            access.error,
+        },
+        {
+          status:
+            access.status,
+        },
+      );
+    }
+
+    const body =
+      (await request.json()) as IntakeBody;
+
+    /* =====================================================
+       CURRENT STEP
+    ===================================================== */
+
+    const requestedStep =
+      Number(
+        body.currentStep ??
+          1,
+      );
+
+    const currentStep =
+      Math.min(
+        5,
+        Math.max(
+          1,
+          Number.isFinite(
+            requestedStep,
+          )
+            ? Math.trunc(
+                requestedStep,
+              )
+            : 1,
+        ),
+      );
+
+    const supabase =
+      getSupabaseAdmin();
+
+    /* =====================================================
+       SAVE PROGRESS
+    ===================================================== */
+
+    const {
+      error,
+    } = await supabase
+      .from(
+        "booking_intake_forms",
+      )
+      .update({
+        ...mapAnswers(
+          body,
+        ),
+
+        current_step:
+          currentStep,
+      })
+      .eq(
+        "id",
+        access.result
+          .form.id,
+      )
+      .eq(
+        "status",
+        "active",
+      )
+      .is(
+        "submitted_at",
+        null,
+      );
+
+    if (error) {
+      console.error(
+        "Intake draft error:",
+        error,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "No fue posible guardar tu progreso.",
+        },
+        {
+          status:
+            500,
+        },
+      );
+    }
+
+    return NextResponse.json({
+      success:
+        true,
+
+      currentStep,
+    });
+  } catch (
+    error
   ) {
-    return NextResponse.json(
-      {
-        error:
-          access.error,
-      },
-      {
-        status:
-          access.status,
-      },
-    );
-  }
-
-  const body =
-    (await request.json()) as Record<
-      string,
-      unknown
-    >;
-
-  const requestedStep =
-    Number(
-      body.currentStep ??
-      1,
-    );
-
-  const currentStep =
-    Math.min(
-      5,
-      Math.max(
-        1,
-        Number.isFinite(
-          requestedStep,
-        )
-          ? Math.trunc(
-              requestedStep,
-            )
-          : 1,
-      ),
-    );
-
-  const supabase =
-    getSupabaseAdmin();
-
-  const {
-    error,
-  } = await supabase
-    .from(
-      "booking_intake_forms",
-    )
-    .update({
-      ...mapAnswers(
-        body,
-      ),
-
-      current_step:
-        currentStep,
-    })
-    .eq(
-      "id",
-      access.result
-        .form.id,
-    );
-
-  if (error) {
     console.error(
-      "Intake draft error:",
+      "Unexpected intake draft error:",
       error,
     );
 
@@ -430,16 +567,11 @@ export async function PATCH(
       },
     );
   }
-
-  return NextResponse.json({
-    success:
-      true,
-  });
 }
 
-
 /* =========================================================
-   ENVÍO FINAL
+   POST
+   FINAL SUBMISSION
 ========================================================= */
 
 export async function POST(
@@ -448,69 +580,262 @@ export async function POST(
     params,
   }: Params,
 ) {
-  const {
-    token,
-  } = await params;
-
-  const access =
-    await validateAccess(
+  try {
+    const {
       token,
-    );
+    } = await params;
 
-  if (
-    !access.result
-  ) {
+    const access =
+      await validateAccess(
+        token,
+      );
+
+    if (
+      !access.result
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            access.error,
+        },
+        {
+          status:
+            access.status,
+        },
+      );
+    }
+
+    const body =
+      (await request.json()) as IntakeBody;
+
+    const supabase =
+      getSupabaseAdmin();
+
+    const now =
+      new Date()
+        .toISOString();
+
+    /* =====================================================
+       GUARDAR ENVÍO FINAL
+
+       .is(submitted_at, null)
+       +
+       status = active
+
+       evita un segundo envío.
+    ===================================================== */
+
+    const {
+      data:
+        submittedForm,
+
+      error:
+        submitError,
+    } = await supabase
+      .from(
+        "booking_intake_forms",
+      )
+      .update({
+        ...mapAnswers(
+          body,
+        ),
+
+        /*
+          Nos aseguramos de que identidad
+          también exista en formularios
+          antiguos.
+        */
+
+        invitee_name:
+          access.result
+            .inviteeName,
+
+        invitee_email:
+          access.result
+            .inviteeEmail,
+
+        current_step:
+          5,
+
+        status:
+          "submitted",
+
+        submitted_at:
+          now,
+      })
+      .eq(
+        "id",
+        access.result
+          .form.id,
+      )
+      .eq(
+        "status",
+        "active",
+      )
+      .is(
+        "submitted_at",
+        null,
+      )
+      .select("*")
+      .maybeSingle();
+
+    if (
+      submitError
+    ) {
+      console.error(
+        "Intake submit error:",
+        submitError,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "No fue posible enviar el formulario.",
+        },
+        {
+          status:
+            500,
+        },
+      );
+    }
+
+    /*
+      Si dos requests intentaran enviarlo
+      al mismo tiempo, uno de ellos ya no
+      encontrará status=active.
+    */
+
+    if (
+      !submittedForm
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Este formulario ya fue enviado.",
+        },
+        {
+          status:
+            409,
+        },
+      );
+    }
+
+    /* =====================================================
+       CORREO PARA EDNA
+
+       Primero guardamos respuestas.
+       Después enviamos email.
+
+       Si Resend falla, NO perdemos
+       el formulario.
+    ===================================================== */
+
+    try {
+      const emailResult =
+        await sendIntakeSubmissionEmail({
+          form:
+            submittedForm,
+
+          bookingReference:
+            access.result
+              .booking
+              ?.booking_reference ??
+            null,
+        });
+
+      if (
+        emailResult.error
+      ) {
+        console.error(
+          "Intake coach email error:",
+          emailResult.error,
+        );
+
+        await supabase
+          .from(
+            "booking_intake_forms",
+          )
+          .update({
+            coach_email_sent_at:
+              null,
+
+            coach_email_error:
+              JSON.stringify(
+                emailResult.error,
+              ),
+          })
+          .eq(
+            "id",
+            submittedForm.id,
+          );
+      } else {
+        await supabase
+          .from(
+            "booking_intake_forms",
+          )
+          .update({
+            coach_email_sent_at:
+              new Date()
+                .toISOString(),
+
+            coach_email_error:
+              null,
+          })
+          .eq(
+            "id",
+            submittedForm.id,
+          );
+      }
+    } catch (
+      emailError
+    ) {
+      console.error(
+        "Intake coach email exception:",
+        emailError,
+      );
+
+      await supabase
+        .from(
+          "booking_intake_forms",
+        )
+        .update({
+          coach_email_sent_at:
+            null,
+
+          coach_email_error:
+            emailError instanceof
+            Error
+              ? emailError.message
+              : "Unknown email error",
+        })
+        .eq(
+          "id",
+          submittedForm.id,
+        );
+    }
+
+    /* =====================================================
+       SUCCESS
+    ===================================================== */
+
     return NextResponse.json(
       {
-        error:
-          access.error,
+        success:
+          true,
+
+        submittedAt:
+          now,
       },
       {
         status:
-          access.status,
+          200,
       },
     );
-  }
-
-  const body =
-    (await request.json()) as Record<
-      string,
-      unknown
-    >;
-
-  const supabase =
-    getSupabaseAdmin();
-
-  const now =
-    new Date()
-      .toISOString();
-
-  const {
-    error,
-  } = await supabase
-    .from(
-      "booking_intake_forms",
-    )
-    .update({
-      ...mapAnswers(
-        body,
-      ),
-
-      current_step:
-        5,
-
-      submitted_at:
-        now,
-    })
-    .eq(
-      "id",
-      access.result
-        .form.id,
-    );
-
-  if (error) {
+  } catch (
+    error
+  ) {
     console.error(
-      "Intake submit error:",
+      "Unexpected intake submit error:",
       error,
     );
 
@@ -525,9 +850,4 @@ export async function POST(
       },
     );
   }
-
-  return NextResponse.json({
-    success:
-      true,
-  });
 }

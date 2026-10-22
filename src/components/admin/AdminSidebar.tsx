@@ -5,32 +5,52 @@ import { usePathname } from "next/navigation";
 
 const navigation = [
   {
-    label: "Reservas",
-    href: "/admin/reservas",
+    label:
+      "Reservas",
+    href:
+      "/admin/reservas",
   },
   {
-    label: "Procesos",
-    href: "/admin/procesos",
+    label:
+      "Procesos",
+    href:
+      "/admin/procesos",
   },
   {
-    label: "Calendario",
-    href: "/admin/calendario",
+    label:
+      "Formularios",
+    href:
+      "/admin/formularios",
   },
   {
-    label: "Servicios",
-    href: "/admin/servicios",
+    label:
+      "Calendario",
+    href:
+      "/admin/calendario",
   },
   {
-    label: "Recursos",
-    href: "/admin/recursos",
+    label:
+      "Servicios",
+    href:
+      "/admin/servicios",
   },
   {
-    label: "Testimonios",
-    href: "/admin/testimonios",
+    label:
+      "Recursos",
+    href:
+      "/admin/recursos",
   },
   {
-    label: "Configuración",
-    href: "/admin/configuracion",
+    label:
+      "Testimonios",
+    href:
+      "/admin/testimonios",
+  },
+  {
+    label:
+      "Configuración",
+    href:
+      "/admin/configuracion",
   },
 ];
 
