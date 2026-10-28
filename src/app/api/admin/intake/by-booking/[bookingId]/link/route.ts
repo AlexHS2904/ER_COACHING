@@ -12,13 +12,12 @@ import {
 } from "@/lib/supabase/admin";
 
 import {
-  createIntakeAccess,
   hashIntakeToken,
+  isValidIntakeToken,
 } from "@/lib/intake/intake-access";
 
 import {
   decryptIntakeToken,
-  encryptIntakeToken,
 } from "@/lib/intake/intake-token-crypto";
 
 type Props = {
@@ -160,141 +159,31 @@ export async function GET(
       );
     }
 
-    /* =====================================================
-       RECUPERAR / REPARAR TOKEN
-
-       Caso normal:
-       - desciframos token
-       - comprobamos que SHA-256 coincida
-
-       Caso legacy o inconsistente:
-       - generamos token nuevo
-       - guardamos hash + token cifrado
-    ===================================================== */
-
-    let token:
-      string | null =
-      null;
-
-    let needsRepair =
-      false;
-
-    if (
-      form
-        .access_token_encrypted
-    ) {
-      try {
-        const decryptedToken =
-          decryptIntakeToken(
-            form
-              .access_token_encrypted,
-          );
-
-        const decryptedHash =
-          hashIntakeToken(
-            decryptedToken,
-          );
-
-        if (
-          decryptedHash ===
-          form
-            .access_token_hash
-        ) {
-          token =
-            decryptedToken;
-        } else {
-          /*
-            Tenemos token cifrado,
-            pero no corresponde con
-            el hash guardado.
-          */
-          needsRepair =
-            true;
-        }
-      } catch (
-        decryptError
-      ) {
-        console.error(
-          "Intake token decrypt error:",
-          decryptError,
-        );
-
-        needsRepair =
-          true;
-      }
-    } else {
-      /*
-        Formulario creado antes
-        del sistema de cifrado.
-      */
-      needsRepair =
-        true;
-    }
-
-    /* =====================================================
-       AUTOREPARACIÓN
-    ===================================================== */
-
-    if (needsRepair) {
-      const access =
-        createIntakeAccess();
-
-      token =
-        access.token;
-
-      const encryptedToken =
-        encryptIntakeToken(
-          access.token,
-        );
-
-      const {
-        error:
-          repairError,
-      } = await supabase
-        .from(
-          "booking_intake_forms",
-        )
-        .update({
-          access_token_hash:
-            access.tokenHash,
-
-          access_token_encrypted:
-            encryptedToken,
-        })
-        .eq(
-          "id",
-          form.id,
-        );
-
-      if (
-        repairError
-      ) {
-        console.error(
-          "Intake token repair error:",
-          repairError,
-        );
-
-        return NextResponse.json(
-          {
-            error:
-              "No fue posible recuperar el acceso al formulario.",
-          },
-          {
-            status: 500,
-          },
-        );
-      }
-    }
-
-    if (!token) {
+    // Read-only: missing or inconsistent access requires explicit review.
+    if (!form.access_token_hash || !form.access_token_encrypted) {
       return NextResponse.json(
         {
-          error:
-            "No fue posible generar el acceso al formulario.",
+          error: "El formulario no tiene datos de acceso completos. Se requiere revisión administrativa; no se generó un token nuevo.",
         },
+        { status: 409 },
+      );
+    }
+
+    let token: string;
+    try {
+      token = decryptIntakeToken(form.access_token_encrypted);
+      if (
+        !isValidIntakeToken(token) ||
+        hashIntakeToken(token) !== form.access_token_hash
+      ) {
+        throw new Error("Intake token hash mismatch");
+      }
+    } catch {
+      return NextResponse.json(
         {
-          status: 500,
+          error: "Error de integridad del acceso al formulario. Se requiere revisión administrativa; el token no fue modificado.",
         },
+        { status: 409 },
       );
     }
 
@@ -328,6 +217,8 @@ export async function GET(
         form
           .current_step ??
         1,
+    }, {
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
     console.error(

@@ -4,6 +4,7 @@ import {
 } from "@/lib/email/resend";
 
 type Params = {
+  formId: string;
   customerName: string;
   customerEmail: string;
   serviceName: string;
@@ -11,6 +12,7 @@ type Params = {
 };
 
 export async function sendIntakeFormReadyEmail({
+  formId,
   customerName,
   customerEmail,
   serviceName,
@@ -46,5 +48,7 @@ export async function sendIntakeFormReadyEmail({
           serviceName,
           formUrl,
         }),
+    }, {
+      idempotencyKey: `intake-ready/${formId}`,
     });
 }
