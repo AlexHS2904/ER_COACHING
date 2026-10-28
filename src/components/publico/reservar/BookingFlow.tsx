@@ -216,6 +216,8 @@ const [
   const [submitting, setSubmitting] =
     useState(false);
 
+  const reservationSubmissionLock = useRef(false);
+
   const [formError, setFormError] =
     useState("");
 
@@ -401,6 +403,10 @@ const [
   ) {
     event.preventDefault();
 
+    if (reservationSubmissionLock.current || submitting) {
+      return;
+    }
+
     setFormError("");
 
     if (
@@ -465,6 +471,7 @@ const [
     }
 
     try {
+      reservationSubmissionLock.current = true;
       setSubmitting(true);
 
       const response = await fetch(
@@ -537,7 +544,7 @@ const [
           ? error.message
           : "No fue posible confirmar la reserva.",
       );
-    } finally {
+      reservationSubmissionLock.current = false;
       setSubmitting(false);
     }
   }
