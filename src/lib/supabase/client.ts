@@ -26,5 +26,11 @@ export function createClient() {
   return createBrowserClient(
     supabaseUrl,
     supabasePublishableKey,
+    {
+      cookieOptions: {
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
   );
 }

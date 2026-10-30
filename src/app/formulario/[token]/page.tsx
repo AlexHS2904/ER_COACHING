@@ -112,6 +112,28 @@ export default async function IntakePage({
   }
 
   /* =====================================================
+     YA ENVIADO
+
+     El mismo token sigue funcionando,
+     pero ya no permite modificar respuestas.
+  ===================================================== */
+
+  if (
+    form.submitted_at ||
+    form.status ===
+      "submitted"
+  ) {
+    return (
+      <StatusPage
+        eyebrow="Formulario completado"
+        title="Este formulario ya fue completado."
+        description="Tus respuestas fueron enviadas correctamente y ya están disponibles para Edna."
+        success
+      />
+    );
+  }
+
+  /* =====================================================
      EXPIRADO
   ===================================================== */
 
@@ -127,28 +149,6 @@ export default async function IntakePage({
         eyebrow="Enlace expirado"
         title="Este formulario ya no está disponible."
         description="El periodo para completar este formulario ha terminado."
-      />
-    );
-  }
-
-  /* =====================================================
-     YA ENVIADO
-
-     El mismo token sigue funcionando,
-     pero ya no permite modificar respuestas.
-  ===================================================== */
-
-  if (
-    form.submitted_at ||
-    form.status ===
-      "submitted"
-  ) {
-    return (
-      <StatusPage
-        eyebrow="Formulario completado"
-        title="Gracias por compartir este espacio."
-        description="Tus respuestas fueron enviadas correctamente y ya están disponibles para Edna."
-        success
       />
     );
   }

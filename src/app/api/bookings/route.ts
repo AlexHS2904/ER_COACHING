@@ -6,13 +6,19 @@ import {
 import { createProcessAccess } from "@/lib/coaching/process-access";
 import { sendBookingEmails } from "@/lib/email/send-booking-emails";
 import { createGoogleCalendarEvent } from "@/lib/google/calendar";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { isStripeTestCheckoutEnabled } from "@/lib/stripe/server";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
+import { createBookingAccess, hashBookingAccess, bookingAccessCookie, bookingCookieOptions } from "@/lib/stripe/access";
+import { hasCurrentBookingAcceptance } from "@/lib/legal/acceptance";
 
 /* =========================================================
    TYPES
 ========================================================= */
 
 type BookingBody = {
+  legalAcceptance?: unknown;
   service?: unknown;
   startsAt?: unknown;
   name?: unknown;
@@ -109,7 +115,7 @@ export async function POST(
     if (processCancelError) {
       console.error(
         "Error cancelling coaching process:",
-        processCancelError,
+        googleErrorLogMetadata(processCancelError),
       );
     }
   }
@@ -121,6 +127,13 @@ export async function POST(
 
     const body =
       (await request.json()) as BookingBody;
+
+    if (!body || !hasCurrentBookingAcceptance(body.legalAcceptance)) {
+      return NextResponse.json(
+        { error: "Lee y acepta los Términos y Condiciones vigentes antes de continuar." },
+        { status: 400 },
+      );
+    }
 
     /* =====================================================
        2. VALIDAR SERVICIO
@@ -287,6 +300,9 @@ export async function POST(
         .trim()
         .toLowerCase();
 
+    const limited = await enforcePublicAbuse(request, "booking-create", customerEmail);
+    if (limited) return limited;
+
     /* =====================================================
        7. IDENTIFICAR TIPO DE SERVICIO
 
@@ -306,6 +322,8 @@ export async function POST(
       .select(
         `
           service_type,
+          slug,
+          name,
           booking_enabled,
           requires_quote
         `,
@@ -326,7 +344,7 @@ export async function POST(
     ) {
       console.error(
         "Error reading service:",
-        serviceError,
+        googleErrorLogMetadata(serviceError),
       );
 
       return NextResponse.json(
@@ -358,6 +376,10 @@ export async function POST(
     /* =====================================================
        8. CREAR BOOKING / PROCESO
     ===================================================== */
+
+    if (isStripeTestCheckoutEnabled() && service.service_type === "single" && service.slug === "sesion-1-1") {
+      return NextResponse.json({ code: "checkout_required", error: "Esta sesión requiere completar el pago en Checkout." }, { status: 409 });
+    }
 
     let bookingResult:
       | BookingRpcResult[]
@@ -395,8 +417,9 @@ export async function POST(
 
       const rpcResult =
         await supabase.rpc(
-          "create_package_booking",
+          "create_package_booking_with_legal_v1",
           {
+            p_legal_acceptance: body.legalAcceptance,
             p_service_slug:
               serviceSlug,
 
@@ -436,8 +459,9 @@ export async function POST(
 
       const rpcResult =
         await supabase.rpc(
-          "create_booking",
+          "create_booking_with_legal_v1",
           {
+            p_legal_acceptance: body.legalAcceptance,
             p_service_slug:
               serviceSlug,
 
@@ -476,7 +500,7 @@ export async function POST(
     if (bookingError) {
       console.error(
         "Error creating booking:",
-        bookingError,
+        googleErrorLogMetadata(bookingError),
       );
 
       const unavailable =
@@ -621,7 +645,7 @@ export async function POST(
     ) {
       console.error(
         "Error reading booking:",
-        bookingReadError,
+        googleErrorLogMetadata(bookingReadError),
       );
 
       await supabase
@@ -688,7 +712,7 @@ export async function POST(
     ) {
       console.error(
         "Google Calendar error:",
-        calendarError,
+        googleErrorLogMetadata(calendarError),
       );
 
       /*
@@ -780,7 +804,7 @@ export async function POST(
     ) {
       console.error(
         "Error saving calendar data:",
-        calendarSaveError,
+        googleErrorLogMetadata(calendarSaveError),
       );
 
       /*
@@ -907,7 +931,7 @@ export async function POST(
     } catch (emailError) {
       console.error(
         "Email integration error:",
-        emailError,
+        googleErrorLogMetadata(emailError),
       );
 
       const message =
@@ -1015,7 +1039,7 @@ export async function POST(
 
       console.error(
         "Error saving email status:",
-        emailSaveError,
+        googleErrorLogMetadata(emailSaveError),
       );
     }
 
@@ -1023,7 +1047,15 @@ export async function POST(
        16. RESPUESTA FINAL AL FRONTEND
     ===================================================== */
 
-    return NextResponse.json(
+    // Grant a private confirmation credential only to the creating browser.
+    // A booking reference by itself never grants access to its status/details.
+    const confirmationToken = createBookingAccess();
+    const { error: accessSaveError } = await supabase.from("bookings")
+      .update({ booking_access_token_hash: hashBookingAccess(confirmationToken) })
+      .eq("id", booking.id);
+    if (accessSaveError) console.error("Booking confirmation credential could not be saved", { bookingId: booking.id });
+
+    const response = NextResponse.json(
       {
         success: true,
 
@@ -1089,10 +1121,12 @@ export async function POST(
         status: 201,
       },
     );
+    if (!accessSaveError) response.cookies.set(bookingAccessCookie(booking.id), confirmationToken, bookingCookieOptions);
+    return response;
   } catch (error) {
     console.error(
       "Unexpected booking error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     /* =====================================================
@@ -1141,7 +1175,7 @@ export async function POST(
       ) {
         console.error(
           "Error cancelling booking:",
-          bookingCancelError,
+          googleErrorLogMetadata(bookingCancelError),
         );
       }
     }

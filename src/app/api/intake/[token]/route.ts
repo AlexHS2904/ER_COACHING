@@ -14,6 +14,10 @@ import {
 import {
   sendIntakeSubmissionEmail,
 } from "@/lib/email/send-intake-subimssion-mail";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
+import { PRIVACY_NOTICE_VERSION } from "@/lib/legal/documents";
+import { hashIntakeToken } from "@/lib/intake/intake-access";
 
 /* =========================================================
    TYPES
@@ -30,6 +34,41 @@ type IntakeBody =
     string,
     unknown
   >;
+
+function hasSensitiveDataConsent(body: unknown): body is IntakeBody {
+  return Boolean(body && typeof body === "object" && !Array.isArray(body) &&
+    (body as IntakeBody).sensitiveDataConsent === true &&
+    (body as IntakeBody).privacyNoticeVersion === PRIVACY_NOTICE_VERSION);
+}
+
+function missingConsentResponse() {
+  return NextResponse.json({
+    error: "Debes aceptar el tratamiento de datos sensibles conforme al Aviso de Privacidad vigente antes de guardar o enviar el formulario.",
+  }, { status: 400 });
+}
+
+function hasAdultAge(body: IntakeBody): boolean {
+  return typeof body.age === "number" && Number.isInteger(body.age) && body.age >= 18 && body.age <= 120;
+}
+
+function invalidAgeResponse() {
+  return NextResponse.json({ error: "Para continuar, confirma una edad válida de al menos 18 años." }, { status: 400 });
+}
+
+function intakeSaveRejection(result: { error_code?: string } | null) {
+  const errors: Record<string, { status: number; error: string }> = {
+    already_submitted: { status: 409, error: "Este formulario ya fue enviado." },
+    expired: { status: 410, error: "Este enlace ha expirado." },
+    inactive: { status: 410, error: "Este formulario ya no está disponible." },
+    invalid_access: { status: 403, error: "No fue posible acceder al formulario." },
+    booking_unavailable: { status: 403, error: "El formulario todavía no está disponible." },
+  };
+  if (result?.error_code === "consent_required") return missingConsentResponse();
+  if (result?.error_code === "invalid_age") return invalidAgeResponse();
+  if (!result?.error_code) return null;
+  const failure = errors[result.error_code] ?? { status: 500, error: "No fue posible guardar el formulario." };
+  return NextResponse.json({ error: failure.error }, { status: failure.status });
+}
 
 /* =========================================================
    CLEANERS
@@ -441,6 +480,9 @@ export async function PATCH(
       token,
     } = await params;
 
+    const limited = await enforcePublicAbuse(request, "intake-draft", token);
+    if (limited) return limited;
+
     const access =
       await validateAccess(
         token,
@@ -462,7 +504,10 @@ export async function PATCH(
     }
 
     const body =
-      (await request.json()) as IntakeBody;
+      await request.json();
+
+    if (!hasSensitiveDataConsent(body)) return missingConsentResponse();
+    if (!hasAdultAge(body)) return invalidAgeResponse();
 
     /* =====================================================
        CURRENT STEP
@@ -497,37 +542,23 @@ export async function PATCH(
     ===================================================== */
 
     const {
+      data: saved,
       error,
     } = await supabase
-      .from(
-        "booking_intake_forms",
-      )
-      .update({
-        ...mapAnswers(
-          body,
-        ),
-
-        current_step:
-          currentStep,
-      })
-      .eq(
-        "id",
-        access.result
-          .form.id,
-      )
-      .eq(
-        "status",
-        "active",
-      )
-      .is(
-        "submitted_at",
-        null,
-      );
+      .rpc("save_intake_with_legal_consent_v1", {
+        p_form_id: access.result.form.id,
+        p_access_token_hash: hashIntakeToken(token),
+        p_answers: mapAnswers(body),
+        p_current_step: currentStep,
+        p_submit: false,
+        p_privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        p_sensitive_data_consent: true,
+      });
 
     if (error) {
       console.error(
         "Intake draft error:",
-        error,
+        googleErrorLogMetadata(error),
       );
 
       return NextResponse.json(
@@ -542,6 +573,12 @@ export async function PATCH(
       );
     }
 
+    const rejected = intakeSaveRejection(saved);
+    if (rejected) return rejected;
+    if (!saved?.form || saved.form.id !== access.result.form.id) {
+      return NextResponse.json({ error: "No fue posible guardar tu progreso." }, { status: 500 });
+    }
+
     return NextResponse.json({
       success:
         true,
@@ -553,7 +590,7 @@ export async function PATCH(
   ) {
     console.error(
       "Unexpected intake draft error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(
@@ -585,6 +622,9 @@ export async function POST(
       token,
     } = await params;
 
+    const limited = await enforcePublicAbuse(request, "intake-submit", token);
+    if (limited) return limited;
+
     const access =
       await validateAccess(
         token,
@@ -606,85 +646,45 @@ export async function POST(
     }
 
     const body =
-      (await request.json()) as IntakeBody;
+      await request.json();
+
+    if (!hasSensitiveDataConsent(body)) return missingConsentResponse();
+    if (!hasAdultAge(body)) return invalidAgeResponse();
 
     const supabase =
       getSupabaseAdmin();
 
-    const now =
-      new Date()
-        .toISOString();
-
     /* =====================================================
        GUARDAR ENVÍO FINAL
 
-       .is(submitted_at, null)
-       +
-       status = active
-
-       evita un segundo envío.
+       La RPC revalida token/reserva bajo locks y guarda respuestas,
+       consentimiento y submitted_at juntos usando el reloj de la DB.
+       Un fallo de RPC no tiene fallback de escritura sin evidencia.
     ===================================================== */
 
     const {
       data:
-        submittedForm,
+        saved,
 
       error:
         submitError,
     } = await supabase
-      .from(
-        "booking_intake_forms",
-      )
-      .update({
-        ...mapAnswers(
-          body,
-        ),
-
-        /*
-          Nos aseguramos de que identidad
-          también exista en formularios
-          antiguos.
-        */
-
-        invitee_name:
-          access.result
-            .inviteeName,
-
-        invitee_email:
-          access.result
-            .inviteeEmail,
-
-        current_step:
-          5,
-
-        status:
-          "submitted",
-
-        submitted_at:
-          now,
-      })
-      .eq(
-        "id",
-        access.result
-          .form.id,
-      )
-      .eq(
-        "status",
-        "active",
-      )
-      .is(
-        "submitted_at",
-        null,
-      )
-      .select("*")
-      .maybeSingle();
+      .rpc("save_intake_with_legal_consent_v1", {
+        p_form_id: access.result.form.id,
+        p_access_token_hash: hashIntakeToken(token),
+        p_answers: mapAnswers(body),
+        p_current_step: 5,
+        p_submit: true,
+        p_privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        p_sensitive_data_consent: true,
+      });
 
     if (
       submitError
     ) {
       console.error(
         "Intake submit error:",
-        submitError,
+        googleErrorLogMetadata(submitError),
       );
 
       return NextResponse.json(
@@ -699,23 +699,23 @@ export async function POST(
       );
     }
 
-    /*
-      Si dos requests intentaran enviarlo
-      al mismo tiempo, uno de ellos ya no
-      encontrará status=active.
-    */
+    const rejected = intakeSaveRejection(saved);
+    if (rejected) return rejected;
+    const submittedForm = saved?.form;
 
     if (
-      !submittedForm
+      !submittedForm || submittedForm.id !== access.result.form.id ||
+      submittedForm.status !== "submitted" || typeof submittedForm.submitted_at !== "string" ||
+      !Number.isFinite(Date.parse(submittedForm.submitted_at))
     ) {
       return NextResponse.json(
         {
           error:
-            "Este formulario ya fue enviado.",
+            "No fue posible confirmar el envío del formulario.",
         },
         {
           status:
-            409,
+            500,
         },
       );
     }
@@ -748,7 +748,7 @@ export async function POST(
       ) {
         console.error(
           "Intake coach email error:",
-          emailResult.error,
+          googleErrorLogMetadata(emailResult.error),
         );
 
         await supabase
@@ -791,7 +791,7 @@ export async function POST(
     ) {
       console.error(
         "Intake coach email exception:",
-        emailError,
+        googleErrorLogMetadata(emailError),
       );
 
       await supabase
@@ -824,7 +824,7 @@ export async function POST(
           true,
 
         submittedAt:
-          now,
+          submittedForm.submitted_at,
       },
       {
         status:
@@ -836,7 +836,7 @@ export async function POST(
   ) {
     console.error(
       "Unexpected intake submit error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

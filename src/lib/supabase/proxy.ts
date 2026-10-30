@@ -35,6 +35,10 @@ export async function updateSession(
       supabaseUrl,
       supabasePublishableKey,
       {
+        cookieOptions: {
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        },
         cookies: {
           getAll() {
             return request.cookies.getAll();

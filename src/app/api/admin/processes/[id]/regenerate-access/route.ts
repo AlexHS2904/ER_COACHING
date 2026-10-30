@@ -18,6 +18,7 @@ import {
 import {
   createClient,
 } from "@/lib/supabase/server";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type RouteContext = {
   params: Promise<{
@@ -169,7 +170,7 @@ export async function POST(
       if (processError) {
         console.error(
           "Error reading coaching process:",
-          processError,
+          googleErrorLogMetadata(processError),
         );
       }
 
@@ -285,7 +286,7 @@ export async function POST(
     ) {
       console.error(
         "Error rotating process access:",
-        updateError,
+        googleErrorLogMetadata(updateError),
       );
 
       return NextResponse.json(
@@ -382,7 +383,7 @@ export async function POST(
     } catch (emailError) {
       console.error(
         "Process access email error:",
-        emailError,
+        googleErrorLogMetadata(emailError),
       );
 
       /*
@@ -427,7 +428,7 @@ export async function POST(
       ) {
         console.error(
           "CRITICAL: process access rollback failed:",
-          restoreError,
+          googleErrorLogMetadata(restoreError),
         );
 
         return NextResponse.json(
@@ -456,7 +457,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Unexpected process access regeneration error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

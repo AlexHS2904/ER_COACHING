@@ -182,7 +182,7 @@ export default function Footer() {
             >
               {legalLinks.map((link) => (
                 <li key={link.href}>
-                  <Link
+                  <a
                     href={link.href}
                     className="
                       text-xs text-brand-brown/65
@@ -197,7 +197,7 @@ export default function Footer() {
                     "
                   >
                     {link.label}
-                  </Link>
+                  </a>
                 </li>
               ))}
             </ul>

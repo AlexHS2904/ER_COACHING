@@ -18,6 +18,7 @@ import {
 import {
   getSupabaseAdmin,
 } from "@/lib/supabase/admin";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type Body = {
   sourceType?: unknown;
@@ -233,7 +234,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Review invitation error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

@@ -1,0 +1,24 @@
+-- PROPUESTA ACTUALIZADA. NO EJECUTAR ESTE ARCHIVO.
+-- Fuente SQL canónica preparada, pendiente de preflight/aplicación autorizada:
+-- supabase/migrations/20261029204535_legal_consent_evidence.sql
+-- No aplicar la propuesta antigua ni duplicar columnas con nombres distintos.
+--
+-- BOOKINGS: legal_terms_accepted_at, legal_terms_version,
+-- legal_privacy_notice_version, legal_adult_confirmed_at.
+-- INTAKE: sensitive_data_consent_at, sensitive_data_consent_version.
+-- Nullable y sin backfill: NULL no constituye consentimiento histórico.
+--
+-- La migración canónica contiene checks y seis RPCs nuevas service_role-only:
+-- assert_current_legal_acceptance_v1; record_booking_legal_acceptance_v1;
+-- create_stripe_booking_hold_with_legal_v1; create_booking_with_legal_v1;
+-- create_package_booking_with_legal_v1; save_intake_with_legal_consent_v1.
+-- Los wrappers unen creación y aceptación en una transacción; Intake une
+-- respuestas/consentimiento/submission. Recovery conserva primera evidencia.
+-- Reloj de DB, versión 2026-10-29.2, 18+; sin IP/UA/huella/geolocalización.
+--
+-- El código ya está preparado para estas RPCs. Sin aplicarlas, las operaciones
+-- afectadas fallan de forma cerrada, sin escribir mediante rutas antiguas.
+-- NO se ejecutó la migración, ni siquiera para validar estas funciones en PG.
+-- Antes del deploy: preflight de esquema/firmas, revisión y aplicación explícita
+-- de la migración canónica y verificación post-apply. No ejecutar db push ni
+-- reaplicar las cuatro migraciones existentes.

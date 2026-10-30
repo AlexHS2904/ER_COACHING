@@ -14,6 +14,8 @@ import {
 import {
   createClient,
 } from "@/lib/supabase/server";
+import { sendBookingChangeEmail } from "@/lib/email/send-booking-change-email";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type RouteContext = {
   params: Promise<{
@@ -259,7 +261,8 @@ export async function GET(
     .from("bookings")
     .select(`
       id,
-      status
+      status,
+      payment_flow
     `)
     .eq(
       "id",
@@ -279,6 +282,13 @@ export async function GET(
       {
         status: 404,
       },
+    );
+  }
+
+  if (booking.payment_flow === "stripe") {
+    return NextResponse.json(
+      { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
+      { status: 409 },
     );
   }
 
@@ -318,7 +328,7 @@ export async function GET(
   if (slotsError) {
     console.error(
       "Reschedule availability error:",
-      slotsError,
+      googleErrorLogMetadata(slotsError),
     );
 
     return NextResponse.json(
@@ -440,6 +450,7 @@ export async function POST(
     .select(`
       id,
       status,
+      payment_flow,
       starts_at,
       ends_at,
       google_event_id
@@ -462,6 +473,13 @@ export async function POST(
       {
         status: 404,
       },
+    );
+  }
+
+  if (booking.payment_flow === "stripe") {
+    return NextResponse.json(
+      { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
+      { status: 409 },
     );
   }
 
@@ -534,7 +552,7 @@ export async function POST(
   if (slotsError) {
     console.error(
       "Reschedule slot validation error:",
-      slotsError,
+      googleErrorLogMetadata(slotsError),
     );
 
     return NextResponse.json(
@@ -624,7 +642,7 @@ export async function POST(
     } catch (error) {
       console.error(
         "Google reschedule error:",
-        error,
+        googleErrorLogMetadata(error),
       );
 
       return NextResponse.json(
@@ -696,7 +714,7 @@ export async function POST(
   ) {
     console.error(
       "Database reschedule error:",
-      updateError,
+      googleErrorLogMetadata(updateError),
     );
 
     /* =====================================
@@ -727,7 +745,7 @@ export async function POST(
       ) {
         console.error(
           "CRITICAL: Google rollback failed:",
-          rollbackError,
+          googleErrorLogMetadata(rollbackError),
         );
 
         return NextResponse.json(
@@ -767,8 +785,10 @@ export async function POST(
     );
   }
 
+  const emailWarning = await sendBookingChangeEmail(booking.id, "rescheduled");
   return NextResponse.json({
     ok: true,
+    emailWarning,
 
     booking:
       updatedBooking,

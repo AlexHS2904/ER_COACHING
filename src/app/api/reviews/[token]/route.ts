@@ -20,6 +20,8 @@ import {
 import {
   getSupabaseAdmin,
 } from "@/lib/supabase/admin";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 
 export const runtime =
   "nodejs";
@@ -60,6 +62,9 @@ export async function POST(
       token,
     } =
       await params;
+
+    const limited = await enforcePublicAbuse(request, "review-submit", token);
+    if (limited) return limited;
 
     /* =====================================================
        1. VALIDAR INVITACIÓN
@@ -417,7 +422,7 @@ export async function POST(
       ) {
         console.error(
           "Testimonial photo upload error:",
-          uploadError,
+          googleErrorLogMetadata(uploadError),
         );
 
         return NextResponse.json(
@@ -516,7 +521,7 @@ export async function POST(
 
       console.error(
         "Submit testimonial error:",
-        error,
+        googleErrorLogMetadata(error),
       );
 
       const message =
@@ -570,7 +575,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Unexpected testimonial submit error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     /*

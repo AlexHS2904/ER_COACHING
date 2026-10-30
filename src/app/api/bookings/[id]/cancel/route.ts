@@ -14,6 +14,8 @@ import {
 import {
   createClient,
 } from "@/lib/supabase/server";
+import { sendBookingChangeEmail } from "@/lib/email/send-booking-change-email";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type RouteContext = {
   params: Promise<{
@@ -105,6 +107,7 @@ export async function POST(
     .select(`
       id,
       status,
+      payment_flow,
       booking_reference,
       customer_name,
       google_event_id
@@ -143,6 +146,13 @@ export async function POST(
     });
   }
 
+  if (booking.payment_flow === "stripe") {
+    return NextResponse.json(
+      { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
+      { status: 409 },
+    );
+  }
+
   if (
     ![
       "pending",
@@ -176,7 +186,7 @@ export async function POST(
     } catch (error) {
       console.error(
         "Google Calendar cancellation error:",
-        error,
+        googleErrorLogMetadata(error),
       );
 
       /*
@@ -237,7 +247,7 @@ export async function POST(
   ) {
     console.error(
       "Booking cancellation database error:",
-      updateError,
+      googleErrorLogMetadata(updateError),
     );
 
     return NextResponse.json(
@@ -251,8 +261,11 @@ export async function POST(
     );
   }
 
+  const emailWarning = await sendBookingChangeEmail(booking.id, "cancelled");
   return NextResponse.json({
     ok: true,
+
+    emailWarning,
 
     bookingId:
       cancelledBooking.id,

@@ -11,6 +11,9 @@ import {
 import { useRouter } from "next/navigation";
 
 import type { Service } from "@/lib/data/services";
+import { getBookingFlowId, withBookingFlowLock, getBookingForFlow, rememberBookingForFlow } from "@/lib/stripe/browser-flow";
+import BookingLegalAcceptance from "@/components/legal/BookingLegalAcceptance";
+import { currentBookingAcceptance } from "@/lib/legal/acceptance";
 
 /* =========================================================
    TYPES
@@ -23,6 +26,8 @@ type AvailableSlot = {
 };
 
 type BookingFlowProps = {
+  stripeCheckoutEnabled?: boolean;
+  reservationRestartId?: string;
   services: Service[];
   initialServiceSlug?: string;
 };
@@ -111,6 +116,8 @@ function isValidEmail(email: string) {
 export default function BookingFlow({
   services,
   initialServiceSlug,
+  stripeCheckoutEnabled = false,
+  reservationRestartId,
 }: BookingFlowProps) {
     const router = useRouter();
 
@@ -215,6 +222,7 @@ const [
 
   const [submitting, setSubmitting] =
     useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const reservationSubmissionLock = useRef(false);
 
@@ -409,6 +417,11 @@ const [
 
     setFormError("");
 
+    if (!termsAccepted) {
+      setFormError("Lee y acepta los Términos y Condiciones antes de continuar.");
+      return;
+    }
+
     if (
       !currentService ||
       !selectedDate ||
@@ -474,6 +487,38 @@ const [
       reservationSubmissionLock.current = true;
       setSubmitting(true);
 
+      if (stripeCheckoutEnabled && currentService.service_type === "single" &&
+          currentService.slug === "sesion-1-1" && currentService.session_count === 1) {
+        const payload = {
+          service: currentService.slug, startsAt: selectedSlot.starts_at,
+          name: cleanName, email: cleanEmail, phone: cleanPhone || null, notes: cleanNotes || null,
+        };
+        const flowId = await getBookingFlowId({ ...payload, restart: reservationRestartId });
+        await withBookingFlowLock(flowId, async () => {
+          const bookingId = getBookingForFlow(flowId);
+          const body = bookingId
+            ? { bookingId, legalAcceptance: currentBookingAcceptance }
+            : { ...payload, flowId, legalAcceptance: currentBookingAcceptance };
+          const post = () => fetch("/api/bookings/stripe/checkout", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+          });
+          let response = await post();
+          let result = await response.json();
+          if (response.ok && result.requiresCookie) {
+            response = await post();
+            result = await response.json();
+          }
+          if (result.bookingId) rememberBookingForFlow(flowId, result.bookingId);
+          if (typeof result.statusUrl === "string" && /^\/reservar\/confirmada(?:\?|$)/.test(result.statusUrl)) {
+            router.replace(result.statusUrl);
+            return;
+          }
+          if (!response.ok || !result.checkoutUrl) throw new Error(result.error ?? "No fue posible preparar el pago. Comprueba que las cookies estén habilitadas.");
+          window.location.assign(result.checkoutUrl);
+        });
+        return;
+      }
+
       const response = await fetch(
         "/api/bookings",
         {
@@ -485,6 +530,7 @@ const [
           },
 
           body: JSON.stringify({
+            legalAcceptance: currentBookingAcceptance,
             service:
               currentService.slug,
 
@@ -1196,13 +1242,7 @@ const [
                   </h2>
 
                   <p className="mt-3 max-w-[620px] text-sm leading-6 text-brand-black/55">
-                    Completa tus datos
-                    para confirmar la
-                    reserva. Recibirás
-                    por correo los
-                    detalles de tu
-                    sesión y el enlace
-                    de Google Meet.
+                    Recibirás por correo los detalles de tu sesión.
                   </p>
                 </div>
 
@@ -1561,8 +1601,13 @@ const [
                         focus:border-brand-wine
                       "
                     />
+                    <p className="mt-2 text-xs leading-5 text-brand-brown/70">
+                      Comparte solo información necesaria para organizar la sesión.
+                    </p>
                   </div>
                 </div>
+
+                <BookingLegalAcceptance checked={termsAccepted} onChange={setTermsAccepted} concise />
 
                 {/* ERROR */}
 
@@ -1590,43 +1635,21 @@ const [
 
                 <div
                   className="
-                    mt-8
+                    mt-6
                     flex
                     flex-col
-                    gap-5
-                    border-t
-                    border-brand-taupe/20
-                    pt-6
-                    sm:flex-row
-                    sm:items-center
-                    sm:justify-between
+                    sm:items-start
                   "
                 >
-                  <div className="max-w-[520px]">
-                    <p className="text-sm leading-6 text-brand-brown/55">
-                      Al confirmar,
-                      volveremos a
-                      comprobar que el
-                      horario siga
-                      disponible.
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-brand-brown/40">
-                      Después recibirás
-                      la información de
-                      tu sesión por
-                      correo electrónico.
-                    </p>
-                  </div>
-
                   <button
                     type="submit"
                     disabled={
-                      submitting
+                      submitting || !termsAccepted
                     }
                     className="
                       group
                       flex
+                      w-full
                       min-h-[56px]
                       min-w-[220px]
                       items-center
@@ -1642,12 +1665,13 @@ const [
                       hover:bg-brand-brown
                       disabled:cursor-not-allowed
                       disabled:opacity-50
+                      sm:w-auto
                     "
                   >
                     <span>
-                      {submitting
-                        ? "Confirmando..."
-                        : "Confirmar reserva"}
+                      {stripeCheckoutEnabled && currentService?.slug === "sesion-1-1"
+                        ? (submitting ? "Preparando pago…" : "Proceder al pago")
+                        : (submitting ? "Confirmando..." : "Confirmar reserva")}
                     </span>
 
                     {!submitting && (
@@ -1665,6 +1689,11 @@ const [
                     )}
                   </button>
                 </div>
+                {stripeCheckoutEnabled && currentService?.slug === "sesion-1-1" && (
+                  <p className="mt-3 text-xs leading-5 text-brand-brown/55">
+                    Tu horario quedará apartado 30 minutos mientras completas el pago.
+                  </p>
+                )}
               </form>
             </div>
           )}

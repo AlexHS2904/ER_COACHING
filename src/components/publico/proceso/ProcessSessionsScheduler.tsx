@@ -651,6 +651,14 @@ export default function ProcessSessionScheduler({
           CONFIRMAR
       ================================================ */}
 
+      <p className="mt-6 text-xs leading-5 text-brand-brown/60">
+        Usaremos los datos de tu proceso y el horario elegido para administrar
+        esta sesión y enviarte sus detalles. Consulta el{" "}
+        <a href="/aviso-de-privacidad" className="text-brand-wine underline">
+          Aviso de Privacidad
+        </a>.
+      </p>
+
       <button
         type="submit"
         disabled={

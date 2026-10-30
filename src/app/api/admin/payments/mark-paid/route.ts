@@ -14,6 +14,8 @@ import {
 import {
   activateBookingIntake,
 } from "@/lib/intake/activate-booking-intake";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type Body = {
   bookingId?:
@@ -68,6 +70,15 @@ export async function POST(
         request.url,
       ).origin;
 
+    const booking = await getSupabaseAdmin().from("bookings").select("payment_flow")
+      .eq("id", body.bookingId.trim()).maybeSingle();
+    if (booking.error || !booking.data) {
+      return NextResponse.json({ error: "Reserva no encontrada." }, { status: 404 });
+    }
+    if (booking.data.payment_flow === "stripe") {
+      return NextResponse.json({ error: "El pago de esta reserva debe confirmarse mediante Stripe." }, { status: 409 });
+    }
+
     const result =
       await activateBookingIntake(
         {
@@ -92,7 +103,9 @@ export async function POST(
     );
 
     return NextResponse.json(
-      result,
+      // Preserve the existing admin API field; public redirects never consume
+      // this authorized administrative response or the canonical email URL.
+      { ...result, formUrl: result.canonicalIntakeUrl },
       {
         status:
           200,
@@ -101,7 +114,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Mark paid error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

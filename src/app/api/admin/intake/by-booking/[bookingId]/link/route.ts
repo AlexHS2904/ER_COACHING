@@ -19,6 +19,7 @@ import {
 import {
   decryptIntakeToken,
 } from "@/lib/intake/intake-token-crypto";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 type Props = {
   params: Promise<{
@@ -145,7 +146,7 @@ export async function GET(
     ) {
       console.error(
         "Intake form read error:",
-        formError,
+        googleErrorLogMetadata(formError),
       );
 
       return NextResponse.json(
@@ -223,7 +224,7 @@ export async function GET(
   } catch (error) {
     console.error(
       "Admin intake link error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

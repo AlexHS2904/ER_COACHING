@@ -962,6 +962,14 @@ export default function ReviewForm({
         </span>
       </label>
 
+      <p className="mt-4 text-xs leading-5 text-brand-brown/60">
+        Trataremos tus datos para recibir y revisar tu testimonio; su publicación
+        requiere la autorización anterior. Consulta el{" "}
+        <a href="/aviso-de-privacidad" className="text-brand-wine underline">
+          Aviso de Privacidad
+        </a>.
+      </p>
+
       {error && (
         <p
           role="alert"

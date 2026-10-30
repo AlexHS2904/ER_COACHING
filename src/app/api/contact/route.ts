@@ -9,6 +9,8 @@ import ContactConfirmationEmail from "@/emails/ContactConfirmationEmail";
 import {
   getResend,
 } from "@/lib/email/resend";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 
 type ContactBody = {
   name?: unknown;
@@ -166,6 +168,9 @@ export async function POST(
        CONFIGURACIÓN EMAIL
     ===================================================== */
 
+    const limited = await enforcePublicAbuse(request, "contact", email);
+    if (limited) return limited;
+
     const from =
       process.env
         .RESEND_FROM_EMAIL;
@@ -226,7 +231,7 @@ export async function POST(
     ) {
       console.error(
         "Contact email error:",
-        coachResult.error,
+        googleErrorLogMetadata(coachResult.error),
       );
 
       return NextResponse.json(
@@ -273,7 +278,7 @@ export async function POST(
       ) {
         console.error(
           "Contact confirmation email error:",
-          confirmation.error,
+          googleErrorLogMetadata(confirmation.error),
         );
       }
     } catch (
@@ -281,7 +286,7 @@ export async function POST(
     ) {
       console.error(
         "Contact confirmation email error:",
-        confirmationError,
+        googleErrorLogMetadata(confirmationError),
       );
     }
 
@@ -298,7 +303,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Unexpected contact error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

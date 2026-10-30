@@ -754,8 +754,11 @@ export default function ContactForm() {
             text-brand-brown/40
           "
         >
-          Tus datos se utilizarán únicamente para
-          responder a esta consulta.
+          Trataremos tus datos para atender tu consulta y proteger este
+          formulario frente al abuso. Consulta el{" "}
+          <a href="/aviso-de-privacidad" className="text-brand-wine underline">
+            Aviso de Privacidad
+          </a>.
         </p>
 
         <button

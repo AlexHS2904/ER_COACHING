@@ -15,10 +15,20 @@ const env = { PATH: process.env.PATH, LC_ALL: "C" };
 const options = { env, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] };
 const psqlArgs = ["-X", "-h", directory, "-p", "55439", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-Atq"];
 const migration = readFileSync(new URL("../supabase/migrations/20261027000100_activate_booking_intake_v2.sql", import.meta.url), "utf8");
+const correction = readFileSync(new URL("../supabase/migrations/20261028000200_intake_v2_stable_service_identity.sql", import.meta.url), "utf8");
 let started = false;
+let originalContract;
 
 function sql(input) {
   return execFileSync("psql", psqlArgs, { ...options, input }).trim();
+}
+
+function functionContract() {
+  return sql(`SELECT row_to_json(c) FROM (
+    SELECT oid, proargtypes::text, proallargtypes, proargmodes, proargnames,
+      prorettype, proretset, prosecdef, proconfig, proacl::text
+    FROM pg_proc WHERE oid='public.activate_booking_intake_v2(uuid,text,text,text,text)'::regprocedure
+  ) c;`);
 }
 
 function rpc(id, hash = "a".repeat(64), encrypted = "cipher-a", provider = "manual", reference = "NULL") {
@@ -40,8 +50,19 @@ before(() => {
     CREATE ROLE authenticated;
     CREATE ROLE service_role;
     CREATE TYPE public.test_payment_provider AS ENUM ('manual', 'stripe');
+    CREATE TABLE public.services (
+      id uuid PRIMARY KEY, slug text UNIQUE, name text, service_type text,
+      session_count integer, active boolean DEFAULT true, booking_enabled boolean DEFAULT true
+    );
+    INSERT INTO public.services(id,slug,name,service_type,session_count) VALUES
+      ('11111111-1111-4111-8111-111111111111','sesion-1-1','Sesión 1:1','single',1),
+      ('22222222-2222-4222-8222-222222222222','otra-sesion','Sesión 1:1','single',1),
+      ('33333333-3333-4333-8333-333333333333','paquete','Sesión 1:1','package',1);
     CREATE TABLE public.bookings (
       id uuid PRIMARY KEY,
+      service_id uuid REFERENCES public.services(id) DEFAULT '11111111-1111-4111-8111-111111111111',
+      process_id uuid,
+      package_session_number integer,
       customer_name varchar NOT NULL DEFAULT 'Test Customer',
       customer_email varchar NOT NULL DEFAULT 'customer@example.test',
       service_name_snapshot varchar DEFAULT 'Sesión 1:1',
@@ -66,11 +87,14 @@ before(() => {
       expires_at timestamptz
     );
     ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.booking_intake_forms ENABLE ROW LEVEL SECURITY;
     CREATE FUNCTION public.activate_booking_intake() RETURNS text
       LANGUAGE sql AS $$ SELECT 'v1 preserved'::text $$;
   `);
   sql(migration);
+  originalContract = functionContract();
+  sql(correction);
 });
 
 after(() => {
@@ -80,6 +104,7 @@ after(() => {
 
 test("migration can be reapplied and preserves v1 and service-only privileges", () => {
   sql(migration);
+  sql(correction);
   assert.equal(sql("SELECT public.activate_booking_intake();"), "v1 preserved");
   for (const role of ["anon", "authenticated"]) {
     assert.equal(sql(`SELECT has_function_privilege('${role}', 'public.activate_booking_intake_v2(uuid,text,text,text,text)', 'EXECUTE');`), "f");
@@ -88,6 +113,91 @@ test("migration can be reapplied and preserves v1 and service-only privileges", 
   const id = booking();
   const result = JSON.parse(sql(`SET ROLE service_role; ${rpc(id)}`));
   assert.equal(result.intake_created, true);
+});
+
+test("corrective replacement keeps the exact V2 contract, security and grants", () => {
+  assert.equal(functionContract(), originalContract);
+  sql(correction);
+  assert.equal(functionContract(), originalContract);
+});
+
+test("renamed service activates intake with the booking snapshot and reuses access on retry", () => {
+  sql("UPDATE public.services SET name='Consulta personalizada' WHERE slug='sesion-1-1';");
+  try {
+    const id = booking("service_name_snapshot = 'Consulta personalizada'");
+    const serviceId = sql(`SELECT service_id FROM public.bookings WHERE id='${id}';`);
+    sql("UPDATE public.services SET name='Nuevo nombre visible' WHERE slug='sesion-1-1';");
+    const first = JSON.parse(sql(rpc(id, randomUUID().replaceAll('-', '').repeat(2), 'cipher-renamed')));
+    const paid = sql(`SELECT row_to_json(b) FROM public.bookings b WHERE id='${id}';`);
+    sql(correction);
+    const retry = JSON.parse(sql(rpc(id, randomUUID().replaceAll('-', '').repeat(2), 'unused-renamed')));
+    assert.equal(first.service_name, 'Consulta personalizada');
+    assert.equal(retry.service_name, first.service_name);
+    assert.equal(first.form_id, retry.form_id);
+    assert.equal(first.access_token_hash, retry.access_token_hash);
+    assert.equal(retry.access_token_encrypted, 'cipher-renamed');
+    assert.equal(retry.intake_created, false);
+    assert.equal(retry.payment_already_paid, true);
+    assert.equal(sql(`SELECT row_to_json(b) FROM public.bookings b WHERE id='${id}';`), paid);
+    assert.equal(sql(`SELECT service_id FROM public.bookings WHERE id='${id}';`), serviceId);
+    assert.equal(sql(`SELECT count(*) FROM public.booking_intake_forms WHERE booking_id='${id}';`), '1');
+  } finally { sql("UPDATE public.services SET name='Sesión 1:1' WHERE slug='sesion-1-1';"); }
+});
+
+for (const snapshot of ["NULL", "'Otro nombre de presentación'"]) {
+  test(`snapshot ${snapshot} is presentation only and does not determine intake eligibility`, () => {
+    const id = booking(`service_name_snapshot = ${snapshot}`);
+    const result = JSON.parse(sql(rpc(id, randomUUID().replaceAll('-', '').repeat(2))));
+    assert.equal(result.service_name, snapshot === 'NULL' ? null : 'Otro nombre de presentación');
+    assert.equal(result.intake_created, true);
+  });
+}
+
+test("another single slug cannot activate intake even with the historical display name", () => {
+  const id = booking("service_id = '22222222-2222-4222-8222-222222222222'");
+  assertPaymentConflict(rpc(id), id, /solo aplica a reservas individuales/);
+});
+
+test("package service cannot activate intake even with one session and the historical name", () => {
+  const id = booking("service_id = '33333333-3333-4333-8333-333333333333'");
+  assertPaymentConflict(rpc(id), id, /solo aplica a reservas individuales/);
+});
+
+for (const association of ["process_id = '44444444-4444-4444-8444-444444444444'", "package_session_number = 1", "package_session_number = 0"]) {
+  test(`individual intake rejects booking association: ${association}`, () => {
+    const id = booking(association);
+    assertPaymentConflict(rpc(id), id, /solo aplica a reservas individuales/);
+  });
+}
+
+for (const identity of ["slug = 'changed-business-identity'", "service_type = 'package'", "session_count = 2", "session_count = NULL"]) {
+  test(`changing stable service identity changes eligibility: ${identity}`, () => {
+    const id = booking();
+    sql(`UPDATE public.services SET ${identity} WHERE id='11111111-1111-4111-8111-111111111111';`);
+    try { assertPaymentConflict(rpc(id), id, /solo aplica a reservas individuales/); }
+    finally { sql("UPDATE public.services SET slug='sesion-1-1',service_type='single',session_count=1 WHERE id='11111111-1111-4111-8111-111111111111';"); }
+  });
+}
+
+test("unpublishing a service after booking does not prevent activation or a paid retry", () => {
+  const id = booking();
+  sql("UPDATE public.services SET active=false,booking_enabled=false WHERE slug='sesion-1-1';");
+  try {
+    const first = JSON.parse(sql(rpc(id, randomUUID().replaceAll('-', '').repeat(2))));
+    const retry = JSON.parse(sql(rpc(id)));
+    assert.equal(retry.form_id, first.form_id);
+    assert.equal(retry.access_token_hash, first.access_token_hash);
+    assert.equal(retry.access_token_encrypted, first.access_token_encrypted);
+  } finally { sql("UPDATE public.services SET active=true,booking_enabled=true WHERE slug='sesion-1-1';"); }
+});
+
+test("stable identity changes reject even paid retries without changing payment or existing intake", () => {
+  const id = booking();
+  const first = JSON.parse(sql(rpc(id, randomUUID().replaceAll('-', '').repeat(2))));
+  sql("UPDATE public.services SET slug='changed-business-identity' WHERE id='11111111-1111-4111-8111-111111111111';");
+  try { assertPaymentConflict(rpc(id), id, /solo aplica a reservas individuales/); }
+  finally { sql("UPDATE public.services SET slug='sesion-1-1' WHERE id='11111111-1111-4111-8111-111111111111';"); }
+  assert.equal(JSON.parse(sql(rpc(id))).form_id, first.form_id);
 });
 
 test("stripe same-reference retry preserves intake, token and payment details", () => {
@@ -209,8 +319,8 @@ test("invalid candidates, cancelled/refunded bookings and ineligible services ar
   for (const state of [
     "status = 'cancelled'",
     "payment_status = 'refunded'",
-    "service_name_snapshot = 'Other'",
-    "service_name_snapshot = NULL",
+    "service_id = NULL",
+    "service_id = '22222222-2222-4222-8222-222222222222'",
     "session_count_snapshot = 2",
   ]) {
     const invalid = booking(state);

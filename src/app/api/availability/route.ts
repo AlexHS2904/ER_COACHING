@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAvailableSlots } from "@/lib/data/availability";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 
 export async function GET(request: NextRequest) {
+  const limited = await enforcePublicAbuse(request, "availability-read");
+  if (limited) return limited;
+
   const searchParams = request.nextUrl.searchParams;
 
   const service = searchParams.get("service");

@@ -18,6 +18,7 @@ function load(path, dependencies = {}, env = {}) {
   const resolve = (name) => {
     if (name === "server-only") return {};
     if (Object.hasOwn(dependencies, name)) return dependencies[name];
+    if (name === "@/lib/google/safe-error") return load("src/lib/google/safe-error.ts");
     if (name === "crypto") return require("node:crypto");
     throw new Error(`Unexpected integration: ${name}`);
   };
@@ -28,8 +29,12 @@ function load(path, dependencies = {}, env = {}) {
 }
 
 const access = load("src/lib/intake/intake-access.ts");
+const safeGoogleError = load("src/lib/google/safe-error.ts");
 const crypto = load("src/lib/intake/intake-token-crypto.ts", {}, {
   INTAKE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+});
+const storedUrl = load("src/lib/intake/stored-intake-url.ts", {
+  "@/lib/intake/intake-access": access, "@/lib/intake/intake-token-crypto": crypto,
 });
 const storedToken = "a".repeat(64);
 const stored = {
@@ -45,8 +50,8 @@ const stored = {
 };
 const params = { bookingId: "booking-1", provider: "manual", siteUrl: "https://example.test" };
 
-function setup({ row = stored, rpcError = null, emailError = false, saveError = false, saveThrows = false } = {}) {
-  const calls = { rpc: [], email: [], updates: [] };
+function setup({ row = stored, rpcError = null, emailError = false, saveError = false, saveThrows = false, form = { status: "active", submitted_at: null, expires_at: "2036-01-01" } } = {}) {
+  const calls = { rpc: [], email: [], updates: [], candidates: 0 };
   const client = {
     async rpc(name, args) {
       calls.rpc.push({ name, args });
@@ -55,6 +60,7 @@ function setup({ row = stored, rpcError = null, emailError = false, saveError = 
     from(table) {
       assert.equal(table, "booking_intake_forms");
       return {
+        select(columns) { return { eq() { return { maybeSingle: async () => ({ data: columns.includes('access_token_encrypted') ? row : form, error: null }) }; } }; },
         update(values) {
           calls.updates.push(values);
           return {
@@ -76,7 +82,9 @@ function setup({ row = stored, rpcError = null, emailError = false, saveError = 
     },
   };
   const helper = load("src/lib/intake/activate-booking-intake.ts", {
-    "@/lib/intake/intake-access": access,
+    "@/lib/google/safe-error": safeGoogleError,
+    "@/lib/intake/intake-access": { ...access, createIntakeAccess() { calls.candidates++; return access.createIntakeAccess(); } },
+    "@/lib/intake/stored-intake-url": storedUrl,
     "@/lib/intake/intake-token-crypto": crypto,
     "@/lib/supabase/admin": { getSupabaseAdmin: () => client },
     "@/lib/email/send-intake-form-ready-email": {
@@ -91,15 +99,17 @@ function setup({ row = stored, rpcError = null, emailError = false, saveError = 
   return { ...helper, calls };
 }
 
-test("paid retries discard candidates and reuse the returned encrypted token/link", async () => {
+test("paid retries reuse the stored encrypted token/link without generating a new candidate", async () => {
   const { activateBookingIntake, calls } = setup();
   const first = await activateBookingIntake(params);
   const retry = await activateBookingIntake(params);
   assert.equal(first.formId, retry.formId);
-  assert.equal(first.formUrl, `https://example.test/formulario/${storedToken}`);
-  assert.equal(first.formUrl, retry.formUrl);
+  assert.equal(first.canonicalIntakeUrl, `https://example.test/formulario/${storedToken}`);
+  assert.equal(first.canonicalIntakeUrl, retry.canonicalIntakeUrl);
   assert.equal(retry.paymentAlreadyPaid, true);
-  assert.notEqual(calls.rpc[0].args.p_access_token_hash, calls.rpc[1].args.p_access_token_hash);
+  assert.equal(calls.candidates, 0);
+  assert.equal(calls.rpc[0].args.p_access_token_hash, calls.rpc[1].args.p_access_token_hash);
+  assert.equal(calls.rpc[0].args.p_access_token_encrypted, calls.rpc[1].args.p_access_token_encrypted);
   for (const { name, args } of calls.rpc) {
     assert.equal(name, "activate_booking_intake_v2");
     const token = crypto.decryptIntakeToken(args.p_access_token_encrypted);
@@ -164,6 +174,7 @@ test("accepted email remains accepted even if status storage throws", async () =
 test("admin mark-paid keeps delegating and returns the same intake on a retry", async () => {
   const { activateBookingIntake } = setup();
   const { POST } = load("src/app/api/admin/payments/mark-paid/route.ts", {
+    "@/lib/supabase/admin": { getSupabaseAdmin: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { payment_flow: null }, error: null }) }) }) }) }) },
     "next/server": { NextResponse: { json: (body, init = {}) => ({ body, status: init.status ?? 200 }) } },
     "next/cache": { revalidatePath() {} },
     "@/lib/admin/is-active-admin": { isActiveAdmin: async () => true },

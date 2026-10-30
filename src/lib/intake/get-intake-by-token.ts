@@ -1,4 +1,5 @@
 import "server-only";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 import {
   getSupabaseAdmin,
@@ -54,7 +55,7 @@ export async function getIntakeByToken(
   if (formError) {
     console.error(
       "getIntakeByToken form error:",
-      formError,
+      googleErrorLogMetadata(formError),
     );
 
     return null;
@@ -134,7 +135,7 @@ export async function getIntakeByToken(
     ) {
       console.error(
         "getIntakeByToken booking error:",
-        bookingError,
+        googleErrorLogMetadata(bookingError),
       );
 
       return null;

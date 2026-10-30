@@ -12,6 +12,7 @@ import {
 } from "react-email";
 
 type Props = {
+  notice?: "confirmed" | "rescheduled" | "cancelled";
   customerName: string;
   serviceName: string;
 
@@ -27,6 +28,7 @@ type Props = {
 
   meetUrl: string | null;
   calendarUrl: string | null;
+  canonicalIntakeUrl?: string | null;
 
   processAccessUrl?:
     | string
@@ -34,6 +36,7 @@ type Props = {
 };
 
 export default function CustomerBookingEmail({
+  notice = "confirmed",
   customerName,
   serviceName,
   dateText,
@@ -44,14 +47,17 @@ export default function CustomerBookingEmail({
   bookingReference,
   meetUrl,
   calendarUrl,
+  canonicalIntakeUrl = null,
   processAccessUrl = null,
 }: Props) {
+  const titleText = notice === "cancelled" ? "Tu sesión fue cancelada." :
+    notice === "rescheduled" ? "Tu sesión fue reprogramada." : "Tu sesión está confirmada.";
   return (
     <Html lang="es">
       <Head />
 
       <Preview>
-        Tu sesión de coaching está confirmada.
+        {titleText}
       </Preview>
 
       <Body style={body}>
@@ -61,12 +67,12 @@ export default function CustomerBookingEmail({
           </Text>
 
           <Heading style={title}>
-            Tu sesión está confirmada.
+            {titleText}
           </Heading>
 
           <Text style={intro}>
-            Hola {customerName}, tu espacio
-            quedó reservado correctamente.
+            Hola {customerName}, {notice === "cancelled" ? "tu reserva fue cancelada. Si necesitas ayuda, comunícate con Edna." :
+              notice === "rescheduled" ? "estos son los datos actualizados de tu sesión." : "tu espacio quedó reservado correctamente."}
           </Text>
 
           {/* =============================================
@@ -117,7 +123,7 @@ export default function CustomerBookingEmail({
               {priceText}
             </Text>
 
-            {meetUrl && (
+            {meetUrl && notice !== "cancelled" && (
               <Button
                 href={meetUrl}
                 style={primaryButton}
@@ -126,12 +132,18 @@ export default function CustomerBookingEmail({
               </Button>
             )}
 
-            {calendarUrl && (
+            {canonicalIntakeUrl && notice !== "cancelled" && (
+              <Button href={canonicalIntakeUrl} style={primaryButton}>
+                Completar formulario
+              </Button>
+            )}
+
+            {calendarUrl && notice !== "cancelled" && (
               <Button
                 href={calendarUrl}
                 style={secondaryButton}
               >
-                Ver en Google Calendar
+                Agregar a Google Calendar
               </Button>
             )}
           </Section>

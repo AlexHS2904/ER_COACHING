@@ -3,6 +3,7 @@
 import {
   useState,
 } from "react";
+import { PRIVACY_NOTICE_VERSION } from "@/lib/legal/documents";
 
 type IntakeData = {
   age:
@@ -559,10 +560,10 @@ export default function IntakeFormWizard({
     setStarted,
   ] =
     useState(
-      initialData
-        .currentStep >
-        1,
+      false,
     );
+
+  const [sensitiveDataConsent, setSensitiveDataConsent] = useState(false);
 
   const [
     step,
@@ -627,10 +628,21 @@ export default function IntakeFormWizard({
     );
   }
 
+  const isAdult = typeof form.age === "number" && Number.isInteger(form.age) &&
+    form.age >= 18 && form.age <= 120;
+
   async function saveDraft(
     nextStep:
       number,
   ) {
+    if (!isAdult) {
+      setError("Este servicio está dirigido a personas de 18 años o más. No podemos continuar con la edad indicada.");
+      return;
+    }
+    if (!sensitiveDataConsent) {
+      setError("Acepta el tratamiento de datos sensibles antes de guardar tus respuestas.");
+      return;
+    }
     setSaving(
       true,
     );
@@ -655,6 +667,8 @@ export default function IntakeFormWizard({
             body:
               JSON.stringify({
                 ...form,
+                sensitiveDataConsent,
+                privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
                 currentStep:
                   nextStep,
               }),
@@ -705,6 +719,14 @@ export default function IntakeFormWizard({
   }
 
   async function submit() {
+    if (!isAdult) {
+      setError("Este servicio está dirigido a personas de 18 años o más. No podemos continuar con la edad indicada.");
+      return;
+    }
+    if (!sensitiveDataConsent) {
+      setError("Acepta el tratamiento de datos sensibles antes de enviar tus respuestas.");
+      return;
+    }
     setSaving(
       true,
     );
@@ -727,9 +749,11 @@ export default function IntakeFormWizard({
             },
 
             body:
-              JSON.stringify(
-                form,
-              ),
+              JSON.stringify({
+                ...form,
+                sensitiveDataConsent,
+                privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+              }),
           },
         );
 
@@ -831,7 +855,7 @@ export default function IntakeFormWizard({
     );
   }
 
-  if (!started) {
+  if (!started || !sensitiveDataConsent || !isAdult) {
     return (
       <div
         className="
@@ -928,12 +952,52 @@ export default function IntakeFormWizard({
           5–8 minutos
         </p>
 
+        <p className="mt-6 max-w-[620px] text-sm leading-6 text-brand-brown/65">
+          Tus respuestas se utilizarán para preparar tu sesión de coaching.
+          Las respuestas abiertas son voluntarias: comparte solo lo necesario
+          para este propósito. No necesitas incluir
+          datos de salud, vida íntima, creencias religiosas, opiniones políticas
+          o preferencias sexuales que no sean necesarios para tu solicitud.
+          Consulta el{" "}
+          <a href="/aviso-de-privacidad" target="_blank" rel="noopener noreferrer"
+            className="font-medium text-brand-wine underline underline-offset-4">
+            Aviso de Privacidad
+          </a>.
+        </p>
+
+        <div className="mt-6 max-w-sm text-sm leading-6 text-brand-brown">
+          <label htmlFor="intake-eligibility-age" className="font-medium">Edad</label>
+          <input id="intake-eligibility-age" type="number" min={18} max={120} required
+            inputMode="numeric" value={form.age ?? ""}
+            onChange={(event) => {
+              update("age", event.target.value ? Number(event.target.value) : null);
+              setSensitiveDataConsent(false);
+            }}
+            className="mt-2 w-full rounded-lg border border-brand-taupe/30 bg-white px-4 py-3" />
+          <p className="mt-2">El servicio está disponible únicamente para personas de 18 años o más.</p>
+          {form.age !== null && !isAdult && <p role="alert" className="mt-2 text-brand-wine">
+            No podemos continuar con la edad indicada. Si necesitas una aclaración, contacta a la coach.
+          </p>}
+        </div>
+
+        <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-brand-taupe/30 bg-white p-5 text-sm leading-6 text-brand-brown">
+          <input type="checkbox" checked={sensitiveDataConsent}
+            disabled={!isAdult}
+            onChange={(event) => setSensitiveDataConsent(event.target.checked)}
+            className="mt-1 h-4 w-4 shrink-0 accent-brand-wine" />
+          <span>
+            He leído el Aviso de Privacidad y consiento expresamente el
+            tratamiento de los datos personales sensibles que, en su caso,
+            proporcione en este formulario para preparar mi sesión y prestar
+            el acompañamiento de coaching solicitado.
+          </span>
+        </label>
+
         <button
           type="button"
+          disabled={!sensitiveDataConsent || !isAdult}
           onClick={() =>
-            setStarted(
-              true,
-            )
+            sensitiveDataConsent && isAdult && setStarted(true)
           }
           className="
             mt-7
@@ -945,6 +1009,8 @@ export default function IntakeFormWizard({
             text-sm
             font-semibold
             text-white
+            disabled:cursor-not-allowed
+            disabled:opacity-50
           "
         >
           Comenzar
@@ -1095,6 +1161,14 @@ export default function IntakeFormWizard({
             section.subtitle
           }
         </p>
+
+        <p className="mt-3 text-xs leading-5 text-brand-brown/60">
+          Usaremos tus respuestas para preparar tu sesión. Consulta el{" "}
+          <a href="/aviso-de-privacidad" target="_blank" rel="noopener noreferrer"
+            className="text-brand-wine underline underline-offset-4">
+            Aviso de Privacidad
+          </a>.
+        </p>
       </div>
 
       <div
@@ -1165,7 +1239,7 @@ export default function IntakeFormWizard({
 
               <input
                 type="number"
-                min={1}
+                min={18}
                 max={120}
                 value={
                   form.age ??

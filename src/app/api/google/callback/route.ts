@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import {
   getGoogleOAuthClient,
 } from "@/lib/google/oauth";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 import {
   getSupabaseAdmin,
@@ -165,7 +166,7 @@ export async function GET(
   } catch (error) {
     console.error(
       "Google OAuth token error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.redirect(
@@ -224,7 +225,7 @@ export async function GET(
   if (databaseError) {
     console.error(
       "Error saving Google token:",
-      databaseError,
+      googleErrorLogMetadata(databaseError),
     );
 
     return NextResponse.redirect(

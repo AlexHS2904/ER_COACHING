@@ -5,6 +5,8 @@ import Footer from "@/components/publico/Footer";
 import BookingFlow from "@/components/publico/reservar/BookingFlow";
 
 import { getActiveServices } from "@/lib/data/services";
+import { isStripeTestCheckoutEnabled } from "@/lib/stripe/server";
+import { isBookingId } from "@/lib/stripe/access";
 
 export const metadata: Metadata = {
   title: "Agendar una cita",
@@ -15,13 +17,14 @@ export const metadata: Metadata = {
 type BookingPageProps = {
   searchParams: Promise<{
     service?: string;
+    restart?: string;
   }>;
 };
 
 export default async function BookingPage({
   searchParams,
 }: BookingPageProps) {
-  const { service } = await searchParams;
+  const { service, restart } = await searchParams;
 
   const services = await getActiveServices();
 
@@ -37,6 +40,8 @@ export default async function BookingPage({
         <BookingFlow
           services={bookableServices}
           initialServiceSlug={service}
+          stripeCheckoutEnabled={isStripeTestCheckoutEnabled()}
+          reservationRestartId={isBookingId(restart) ? restart : undefined}
         />
       </main>
 

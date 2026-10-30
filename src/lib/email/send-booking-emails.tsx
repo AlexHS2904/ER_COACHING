@@ -2,12 +2,17 @@ import "server-only";
 
 import CustomerBookingEmail from "@/emails/CustomerBookingEmail";
 import CoachBookingEmail from "@/emails/CoachBookingEmail";
+import { customerCalendarLink } from "@/lib/google/calendar-link";
 
 import {
   getResend,
 } from "@/lib/email/resend";
 
 type Input = {
+  notice?: "rescheduled" | "cancelled";
+  changeRevision?: string;
+  canonicalIntakeUrl?: string | null;
+  recipients?: ("customer" | "coach")[];
   bookingId: string;
   bookingReference: string;
 
@@ -254,7 +259,7 @@ export async function sendBookingEmails(
          CUSTOMER
       ========================== */
 
-      resend.emails.send(
+      (input.recipients ?? ["customer", "coach"]).includes("customer") ? resend.emails.send(
         {
           from,
 
@@ -262,18 +267,21 @@ export async function sendBookingEmails(
             input.customerEmail,
 
           subject:
-            `Tu sesión está confirmada · ${input.bookingReference}`,
+            `${input.notice === "cancelled" ? "Tu sesión fue cancelada" : input.notice === "rescheduled" ? "Tu sesión fue reprogramada" : "Tu sesión está confirmada"} · ${input.bookingReference}`,
 
           react:
             CustomerBookingEmail(
               {
                 ...common,
+                notice: input.notice,
 
                 customerName:
                   input.customerName,
 
                 calendarUrl:
-                  input.calendarUrl,
+                  customerCalendarLink(input),
+
+                canonicalIntakeUrl: input.canonicalIntakeUrl ?? null,
 
                 processAccessUrl:
                   input.processAccessUrl ??
@@ -283,15 +291,15 @@ export async function sendBookingEmails(
         },
         {
           idempotencyKey:
-            `booking/${input.bookingId}/customer`,
+            input.notice ? `booking/${input.bookingId}/${input.notice}/${input.changeRevision}` : `booking/${input.bookingId}/customer`,
         },
-      ),
+      ) : Promise.resolve({ data: null, error: null }),
 
       /* ==========================
          COACH
       ========================== */
 
-      resend.emails.send(
+      (input.recipients ?? ["customer", "coach"]).includes("coach") ? resend.emails.send(
         {
           from,
 
@@ -324,7 +332,7 @@ export async function sendBookingEmails(
           idempotencyKey:
             `booking/${input.bookingId}/coach`,
         },
-      ),
+      ) : Promise.resolve({ data: null, error: null }),
     ]);
 
   /* =======================================================

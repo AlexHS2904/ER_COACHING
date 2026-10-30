@@ -25,6 +25,7 @@ import {
 } from "@/lib/email/resend";
 
 import ManualIntakeInvitationEmail from "@/emails/ManualIntakeInvitationEmail";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 
 /* =========================================================
    TYPES
@@ -266,7 +267,7 @@ export async function POST(
     ) {
       console.error(
         "Manual intake insert error:",
-        insertError,
+        googleErrorLogMetadata(insertError),
       );
 
       return NextResponse.json(
@@ -350,7 +351,7 @@ export async function POST(
       ) {
         console.error(
           "Manual intake invitation Resend error:",
-          emailResult.error,
+          googleErrorLogMetadata(emailResult.error),
         );
       } else {
         emailSent =
@@ -361,7 +362,7 @@ export async function POST(
     ) {
       console.error(
         "Manual intake invitation email error:",
-        mailError,
+        googleErrorLogMetadata(mailError),
       );
     }
 
@@ -393,7 +394,7 @@ export async function POST(
   ) {
     console.error(
       "Manual intake creation error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     return NextResponse.json(

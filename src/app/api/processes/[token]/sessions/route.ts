@@ -14,6 +14,8 @@ import {
 import {
   createGoogleCalendarEvent,
 } from "@/lib/google/calendar";
+import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 
 import {
   getSupabaseAdmin,
@@ -53,6 +55,10 @@ export async function POST(
   request: NextRequest,
   context: RouteContext,
 ) {
+  const rateParams = await context.params;
+  const limited = await enforcePublicAbuse(request, "process-session", rateParams.token);
+  if (limited) return limited;
+
   const supabase =
     getSupabaseAdmin();
 
@@ -213,7 +219,7 @@ export async function POST(
     if (sessionError) {
       console.error(
         "Error creating process session:",
-        sessionError,
+        googleErrorLogMetadata(sessionError),
       );
 
       const unavailable =
@@ -348,7 +354,7 @@ export async function POST(
     ) {
       console.error(
         "Error reading process booking:",
-        bookingReadError,
+        googleErrorLogMetadata(bookingReadError),
       );
 
       await supabase
@@ -413,7 +419,7 @@ export async function POST(
     ) {
       console.error(
         "Google Calendar process session error:",
-        calendarError,
+        googleErrorLogMetadata(calendarError),
       );
 
       /*
@@ -494,7 +500,7 @@ export async function POST(
     ) {
       console.error(
         "Error saving process session calendar:",
-        calendarSaveError,
+        googleErrorLogMetadata(calendarSaveError),
       );
 
       /*
@@ -617,7 +623,7 @@ export async function POST(
     ) {
       console.error(
         "Process session email error:",
-        emailError,
+        googleErrorLogMetadata(emailError),
       );
 
       const message =
@@ -708,7 +714,7 @@ export async function POST(
 
       console.error(
         "Error saving process session email status:",
-        emailSaveError,
+        googleErrorLogMetadata(emailSaveError),
       );
     }
 
@@ -771,7 +777,7 @@ export async function POST(
   } catch (error) {
     console.error(
       "Unexpected process session error:",
-      error,
+      googleErrorLogMetadata(error),
     );
 
     /*
@@ -810,7 +816,7 @@ export async function POST(
       if (cancelError) {
         console.error(
           "Error cancelling process session:",
-          cancelError,
+          googleErrorLogMetadata(cancelError),
         );
       }
     }

@@ -34,6 +34,10 @@ export async function createClient() {
     supabaseUrl,
     supabasePublishableKey,
     {
+      cookieOptions: {
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      },
       cookies: {
         getAll() {
           return cookieStore.getAll();

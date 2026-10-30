@@ -3,11 +3,14 @@ import {
 } from "@/lib/supabase/admin";
 
 import AdminFormsClient from "@/components/admin/AdminFormsClient";
+import { requireAdmin } from "@/lib/admin/require-admin";
 
 export const dynamic =
   "force-dynamic";
 
 export default async function AdminFormsPage() {
+  await requireAdmin();
+
   const supabase =
     getSupabaseAdmin();
 

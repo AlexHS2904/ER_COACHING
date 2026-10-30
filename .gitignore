@@ -38,9 +38,13 @@ yarn-error.log*
 .env.production.local
 .env*.local
 .env*
+!.env.example
 
 # vercel
 .vercel
+
+# Supabase CLI temporary metadata (never a migration)
+/supabase/.temp/
 
 # typescript
 *.tsbuildinfo

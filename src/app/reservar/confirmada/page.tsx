@@ -1,189 +1,92 @@
 import Link from "next/link";
-
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import Footer from "@/components/publico/Footer";
 import Header from "@/components/publico/Header";
+import BookingStatusActions from "@/components/publico/reservar/BookingStatusActions";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getStripeBookingAdmin } from "@/lib/stripe/server";
+import { bookingAccessCookie, hasBookingAccess, isBookingId } from "@/lib/stripe/access";
+import { bookingConfirmationState } from "@/lib/bookings/confirmation-state";
+import { bookingIntakeDestination } from "@/lib/bookings/intake-destination";
+import { reconcileStripeCheckoutReturn, type CheckoutReturnObservation } from "@/lib/stripe/checkout-return";
+import { hasDurableCurrentBookingAcceptance } from "@/lib/legal/acceptance";
 
-type BookingConfirmationPageProps = {
-  searchParams: Promise<{
-    ref?: string;
-  }>;
-};
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Estado de tu reserva", robots: { index: false, follow: false } };
 
-export default async function BookingConfirmationPage({
-  searchParams,
-}: BookingConfirmationPageProps) {
+export default async function BookingConfirmationPage({ searchParams }: {
+  searchParams: Promise<{ ref?: string; booking?: string; session_id?: string }>;
+}) {
   const params = await searchParams;
-
-  const bookingReference =
-    typeof params.ref === "string"
-      ? params.ref
-      : null;
-
-  return (
-    <>
-      <Header />
-
-      <main className="min-h-[75vh] bg-brand-cream">
-        <section className="px-5 py-20 sm:px-8 sm:py-28">
-          <div className="mx-auto max-w-[720px] text-center">
-            <div
-              className="
-                mx-auto
-                flex
-                h-16
-                w-16
-                items-center
-                justify-center
-                rounded-full
-                bg-brand-green
-                text-2xl
-                text-brand-cream
-              "
-            >
-              ✓
-            </div>
-
-            <p
-              className="
-                mt-7
-                text-xs
-                font-semibold
-                uppercase
-                tracking-[0.28em]
-                text-brand-green
-              "
-            >
-              Reserva confirmada
-            </p>
-
-            <h1
-              className="
-                mt-4
-                font-display
-                text-5xl
-                font-semibold
-                leading-[0.95]
-                text-brand-brown
-                sm:text-6xl
-              "
-            >
-              Tu sesión está lista.
-            </h1>
-
-            <p
-              className="
-                mx-auto
-                mt-6
-                max-w-[560px]
-                text-base
-                leading-7
-                text-brand-brown/60
-              "
-            >
-              Tu horario ha sido reservado
-              correctamente. En unos momentos
-              recibirás por correo todos los
-              detalles de tu sesión y el enlace
-              de Google Meet.
-            </p>
-
-            {bookingReference && (
-              <div
-                className="
-                  mx-auto
-                  mt-10
-                  max-w-[500px]
-                  rounded-[1.5rem]
-                  border
-                  border-brand-taupe/25
-                  bg-white/55
-                  p-7
-                "
-              >
-                <p
-                  className="
-                    text-[0.65rem]
-                    font-semibold
-                    uppercase
-                    tracking-[0.25em]
-                    text-brand-wine
-                  "
-                >
-                  Código de reserva
-                </p>
-
-                <p
-                  className="
-                    mt-3
-                    font-display
-                    text-3xl
-                    font-semibold
-                    text-brand-brown
-                  "
-                >
-                  {bookingReference}
-                </p>
-
-                <p
-                  className="
-                    mt-3
-                    text-sm
-                    leading-6
-                    text-brand-brown/45
-                  "
-                >
-                  Guarda este código por si
-                  necesitas consultar tu
-                  reserva más adelante.
-                </p>
-              </div>
-            )}
-
-            <div
-              className="
-                mx-auto
-                mt-8
-                max-w-[560px]
-                rounded-2xl
-                bg-brand-taupe/10
-                px-6
-                py-5
-              "
-            >
-              <p className="text-sm leading-6 text-brand-brown/60">
-                Revisa también tu carpeta de
-                spam o correo no deseado si no
-                ves la confirmación en unos
-                minutos.
-              </p>
-            </div>
-
-            <Link
-              href="/"
-              className="
-                mx-auto
-                mt-10
-                inline-flex
-                min-h-[52px]
-                items-center
-                justify-center
-                rounded-xl
-                bg-brand-wine
-                px-8
-                font-semibold
-                text-brand-cream
-                transition-colors
-                duration-200
-                hover:bg-brand-brown
-              "
-            >
-              Volver al inicio
-            </Link>
-          </div>
-        </section>
-      </main>
-
-      <Footer />
-    </>
-  );
+  let verified = null;
+  let observation: CheckoutReturnObservation = "unpaid";
+  let intake: Awaited<ReturnType<typeof bookingIntakeDestination>> = { status: "waiting", redirectIntakeUrl: null };
+  try {
+    const db = isBookingId(params.booking) ? getStripeBookingAdmin() : getSupabaseAdmin();
+    const query = db.from("bookings").select(
+      "id,booking_reference,status,payment_status,payment_flow,finalization_status,expired_at,payment_expires_at,booking_access_token_hash,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at",
+    );
+    const result = isBookingId(params.booking)
+      ? await query.eq("id", params.booking).maybeSingle()
+      : typeof params.ref === "string" && params.ref.length <= 100
+        ? await query.eq("booking_reference", params.ref).maybeSingle()
+        : { data: null, error: null };
+    if (!result.error && result.data) {
+      const token = (await cookies()).get(bookingAccessCookie(result.data.id))?.value;
+      if (hasBookingAccess(token, result.data.booking_access_token_hash)) {
+        if (result.data.payment_flow === "stripe") {
+          const returned = await reconcileStripeCheckoutReturn(result.data.id, token, params.session_id);
+          verified = returned.booking;
+          intake = returned.intake;
+          observation = returned.observation;
+        } else if (!params.session_id) {
+          verified = result.data;
+          intake = await bookingIntakeDestination(verified, token);
+        }
+      }
+    }
+  } catch {
+    // No identifiers, secrets, tokens, or customer data are logged or exposed.
+  }
+  // Keep Next's redirect outside the error boundary: its control-flow exception
+  // must reach the router. Completed returns never render the payment screen.
+  if (intake.redirectIntakeUrl) redirect(intake.redirectIntakeUrl);
+  const serverNow = Date.now();
+  const processing = Boolean(verified && verified.payment_status !== "paid" &&
+    verified.status !== "cancelled" && verified.finalization_status !== "review_required" &&
+    ["processing", "unknown"].includes(observation));
+  const state = processing ? {
+    title: "Pago en proceso", detail: "Estamos verificando tu pago y preparando tu sesión. No realices otro pago.", refresh: true,
+  } : verified ? bookingConfirmationState(verified, intake.status, serverNow) : {
+    title: "Consulta el enlace desde el navegador de tu reserva",
+    detail: "No pudimos verificar el acceso. Revisa tu correo o comunícate con Edna si necesitas ayuda.", refresh: false,
+  };
+  const canPay = !processing && verified?.payment_flow === "stripe" && verified.status === "pending" &&
+    verified.payment_status === "pending" && verified.finalization_status !== "review_required" &&
+    Date.parse(verified.payment_expires_at) > serverNow;
+  const paymentExpiresAt = !processing && verified?.payment_flow === "stripe" && verified.status === "pending" &&
+    verified.payment_status === "pending" && verified.finalization_status !== "review_required"
+    ? verified.payment_expires_at : null;
+  return <>
+    <Header />
+    <main className="min-h-[75vh] bg-brand-cream">
+      <section className="mx-auto max-w-[720px] px-5 py-20 text-center sm:py-28">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-brand-wine">Estado de tu reserva</p>
+        <h1 className="mt-4 font-display text-5xl leading-tight text-brand-brown">{state.title}</h1>
+        <p className="mt-6 leading-7 text-brand-brown/60">{state.detail}</p>
+        {verified && <>
+          <p className="mt-8 text-sm text-brand-brown/60">Código de reserva</p>
+          <p className="mt-2 font-display text-3xl text-brand-brown">{verified.booking_reference}</p>
+          <BookingStatusActions bookingId={verified.id} refresh={state.refresh} canPay={Boolean(canPay)}
+            paymentExpiresAt={paymentExpiresAt} serverNow={serverNow} redirectIntakeUrl={intake.redirectIntakeUrl}
+            legalAccepted={hasDurableCurrentBookingAcceptance(verified)} processing={processing} />
+          {verified.status === "cancelled" && verified.expired_at &&
+            <Link href={`/reservar?restart=${verified.id}`} className="mt-6 inline-flex rounded-xl bg-brand-wine px-6 py-3 font-semibold text-white">Elegir otro horario</Link>}
+        </>}
+        <Link href="/" className="mt-10 inline-flex rounded-xl border border-brand-wine/25 px-6 py-3 font-semibold text-brand-wine">Volver al inicio</Link>
+      </section>
+    </main>
+    <Footer />
+  </>;
 }
