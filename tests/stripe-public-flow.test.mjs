@@ -138,17 +138,23 @@ const ast=ts.createSourceFile("BookingFlow.tsx",source,ts.ScriptTarget.Latest,tr
 let handler;
 (function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text==="handleConfirmReservation")handler=node;ts.forEachChild(node,visit);})(ast);
 const compiled=ts.transpileModule(handler.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-function browserFixture({packageFlow=false,failFirst=false,bootstrap=false,name="Sesión 1:1",knownBooking=null,failAfterHold=false,accepted=true,recoveredStatus=null}={}) {
+function browserFixture({packageFlow=false,free=false,stripeCheckoutEnabled=true,failFirst=false,bootstrap=false,name="Sesión 1:1",knownBooking=null,failAfterHold=false,accepted=true,recoveredStatus=null}={}) {
   const calls={posts:[],state:[],navigations:[],remembered:[],errors:[]},lock={current:false};let failed=false,bootstrapped=false;
+  const currentService={slug:packageFlow?"proceso":"sesion-1-1",name:packageFlow?"Proceso":name,
+    service_type:packageFlow?"package":"single",session_count:packageFlow?6:1,price:free?0:packageFlow?2500:500};
+  const paymentPolicy=testModules().load("src/lib/bookings/payment-policy.ts");
+  const currentServiceRequiresPayment=paymentPolicy.serviceRequiresPayment(currentService.price);
+  const currentServiceCanUseStripe=paymentPolicy.canUsePublicStripeCheckout(currentService,stripeCheckoutEnabled);
   const context={
     termsAccepted:accepted,currentBookingAcceptance:legalAcceptance,
     reservationSubmissionLock:lock,submitting:false,setSubmitting:value=>calls.state.push(value),setFormError:message=>calls.errors.push(message),
-    currentService:{slug:packageFlow?"proceso":"sesion-1-1",name:packageFlow?"Proceso":name,service_type:packageFlow?"package":"single",session_count:packageFlow?6:1},
+    currentService,currentServiceRequiresPayment,currentServiceCanUseStripe,
+    currentServicePaymentUnavailable:currentServiceRequiresPayment&&!currentServiceCanUseStripe,
     selectedDate:"2035-01-01",selectedSlot:{starts_at:"2035-01-01T12:00:00Z"},
     customerName:"Test Customer",customerEmail:"test@example.test",customerEmailConfirm:"test@example.test",customerPhone:"",customerNotes:"",isValidEmail:()=>true,
-    stripeCheckoutEnabled:true,reservationRestartId:undefined,getBookingFlowId:async()=>flowId,
+    stripeCheckoutEnabled,reservationRestartId:undefined,getBookingFlowId:async()=>flowId,
     withBookingFlowLock:async(_,work)=>work(),getBookingForFlow:()=>knownBooking,rememberBookingForFlow:(...args)=>calls.remembered.push(args),
-    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>packageFlow?{bookingReference:"PACKAGE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
+    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>free?{bookingReference:"FREE-1"}:packageFlow?{bookingReference:"PACKAGE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
     router:{replace:url=>calls.navigations.push(url)},window:{location:{assign:url=>calls.navigations.push(url)}},console:{error(){}},
   };
   const run=new Function(...Object.keys(context),`${compiled}\nreturn handleConfirmReservation;`)(...Object.values(context));
@@ -166,10 +172,23 @@ test("Stripe browser real failure releases lock and retry retains public flow id
   assert.equal(f.calls.posts.length,2);assert.equal(f.calls.posts[0].body.flowId,f.calls.posts[1].body.flowId);
   assert.equal(f.lock.current,true);
 });
-test("package browser branch still uses original booking endpoint and router.replace",async()=>{
+test("paid package cannot fall through to the legacy booking endpoint",async()=>{
   const f=browserFixture({packageFlow:true});await f.run();
-  assert.equal(f.calls.posts[0].url,"/api/bookings");assert.equal(f.calls.posts[0].body.flowToken,undefined);
-  assert.deepEqual(f.calls.navigations,["/reservar/confirmada?ref=PACKAGE-1"]);assert.equal(f.lock.current,true);
+  assert.deepEqual(f.calls.posts,[]);assert.deepEqual(f.calls.navigations,[]);
+  assert.match(f.calls.errors.at(-1),/pago en línea no está disponible/);assert.equal(f.lock.current,false);
+});
+
+test("paid 1:1 does not create a legacy confirmed booking when public Stripe is unavailable",async()=>{
+  const f=browserFixture({stripeCheckoutEnabled:false});await f.run();
+  assert.deepEqual(f.calls.posts,[]);assert.deepEqual(f.calls.navigations,[]);
+  assert.match(f.calls.errors.at(-1),/No se creó una reserva/);assert.equal(f.lock.current,false);
+});
+
+test("an explicitly free service retains its legacy booking path",async()=>{
+  const f=browserFixture({free:true});await f.run();
+  assert.equal(f.calls.posts[0].url,"/api/bookings");
+  assert.deepEqual(f.calls.navigations,["/reservar/confirmada?ref=FREE-1"]);
+  assert.equal(f.lock.current,true);
 });
 
 test("renamed service still follows Stripe branch and cookie bootstrap stays under submission lock",async()=>{

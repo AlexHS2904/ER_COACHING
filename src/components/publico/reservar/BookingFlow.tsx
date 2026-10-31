@@ -14,6 +14,7 @@ import type { Service } from "@/lib/data/services";
 import { getBookingFlowId, withBookingFlowLock, getBookingForFlow, rememberBookingForFlow } from "@/lib/stripe/browser-flow";
 import BookingLegalAcceptance from "@/components/legal/BookingLegalAcceptance";
 import { currentBookingAcceptance } from "@/lib/legal/acceptance";
+import { canUsePublicStripeCheckout, serviceRequiresPayment } from "@/lib/bookings/payment-policy";
 
 /* =========================================================
    TYPES
@@ -242,6 +243,13 @@ const [
       ),
     [services, selectedService],
   );
+  const currentServiceRequiresPayment = currentService
+    ? serviceRequiresPayment(currentService.price)
+    : false;
+  const currentServiceCanUseStripe = currentService
+    ? canUsePublicStripeCheckout(currentService, stripeCheckoutEnabled)
+    : false;
+  const currentServicePaymentUnavailable = currentServiceRequiresPayment && !currentServiceCanUseStripe;
 
   /* =======================================================
      SERVICIO DESDE URL
@@ -393,7 +401,8 @@ const [
     if (
       !currentService ||
       !selectedDate ||
-      !selectedSlot
+      !selectedSlot ||
+      currentServicePaymentUnavailable
     ) {
       return;
     }
@@ -419,6 +428,11 @@ const [
 
     if (!termsAccepted) {
       setFormError("Lee y acepta los Términos y Condiciones antes de continuar.");
+      return;
+    }
+
+    if (currentServicePaymentUnavailable) {
+      setFormError("El pago en línea no está disponible para este servicio. No se creó una reserva.");
       return;
     }
 
@@ -487,8 +501,7 @@ const [
       reservationSubmissionLock.current = true;
       setSubmitting(true);
 
-      if (stripeCheckoutEnabled && currentService.service_type === "single" &&
-          currentService.slug === "sesion-1-1" && currentService.session_count === 1) {
+      if (currentServiceRequiresPayment && currentServiceCanUseStripe) {
         const payload = {
           service: currentService.slug, startsAt: selectedSlot.starts_at,
           name: cleanName, email: cleanEmail, phone: cleanPhone || null, notes: cleanNotes || null,
@@ -632,6 +645,17 @@ const [
             mejor te funcione.
           </p>
         </div>
+
+        {currentServicePaymentUnavailable && (
+          <div role="status" className="mx-auto mt-8 max-w-[700px] rounded-2xl border border-brand-taupe/30 bg-white/60 px-6 py-5 text-center">
+            <p className="font-display text-2xl text-brand-brown">
+              Reservas temporalmente pausadas
+            </p>
+            <p className="mt-2 text-sm leading-6 text-brand-black/60">
+              Por el momento no es posible reservar este servicio. Gracias por tu comprensión.
+            </p>
+          </div>
+        )}
 
         {/* =================================================
             PASOS 01 + 02
@@ -1024,6 +1048,7 @@ const [
 
                       <button
                         type="button"
+                        disabled={currentServicePaymentUnavailable}
                         onClick={
                           handleContinue
                         }
@@ -1043,10 +1068,14 @@ const [
                           transition-colors
                           duration-200
                           hover:bg-brand-brown
+                          disabled:cursor-not-allowed
+                          disabled:opacity-50
                         "
                       >
                         <span>
-                          {step === 3
+                          {currentServicePaymentUnavailable
+                            ? "Reservas pausadas"
+                            : step === 3
                             ? "Ir a tus datos"
                             : "Continuar"}
                         </span>
@@ -1211,6 +1240,7 @@ const [
         )}
 
         {step === 3 &&
+          !currentServicePaymentUnavailable &&
           currentService &&
           selectedDate &&
           selectedSlot && (
@@ -1644,7 +1674,7 @@ const [
                   <button
                     type="submit"
                     disabled={
-                      submitting || !termsAccepted
+                      submitting || !termsAccepted || currentServicePaymentUnavailable
                     }
                     className="
                       group
@@ -1669,7 +1699,9 @@ const [
                     "
                   >
                     <span>
-                      {stripeCheckoutEnabled && currentService?.slug === "sesion-1-1"
+                      {currentServicePaymentUnavailable
+                        ? "Pago no disponible"
+                        : currentServiceRequiresPayment && currentServiceCanUseStripe
                         ? (submitting ? "Preparando pago…" : "Proceder al pago")
                         : (submitting ? "Confirmando..." : "Confirmar reserva")}
                     </span>
@@ -1689,7 +1721,12 @@ const [
                     )}
                   </button>
                 </div>
-                {stripeCheckoutEnabled && currentService?.slug === "sesion-1-1" && (
+                {currentServicePaymentUnavailable && (
+                  <p role="status" className="mt-3 text-xs leading-5 text-brand-wine">
+                    El pago en línea no está disponible para este servicio. No se creará una reserva.
+                  </p>
+                )}
+                {currentServiceRequiresPayment && currentServiceCanUseStripe && (
                   <p className="mt-3 text-xs leading-5 text-brand-brown/55">
                     Tu horario quedará apartado 30 minutos mientras completas el pago.
                   </p>

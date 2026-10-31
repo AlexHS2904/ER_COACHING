@@ -19,6 +19,7 @@ function load(path, dependencies = {}, env = {}) {
     if (name === "server-only") return {};
     if (Object.hasOwn(dependencies, name)) return dependencies[name];
     if (name === "@/lib/google/safe-error") return load("src/lib/google/safe-error.ts");
+    if (name === "@/lib/bookings/payment-policy") return load("src/lib/bookings/payment-policy.ts");
     if (name === "crypto") return require("node:crypto");
     throw new Error(`Unexpected integration: ${name}`);
   };
@@ -171,10 +172,13 @@ test("accepted email remains accepted even if status storage throws", async () =
   assert.equal(calls.updates[0].ready_email_error, null);
 });
 
-test("admin mark-paid keeps delegating and returns the same intake on a retry", async () => {
+test("admin free legacy activation keeps delegating and returns the same intake on a retry", async () => {
   const { activateBookingIntake } = setup();
   const { POST } = load("src/app/api/admin/payments/mark-paid/route.ts", {
-    "@/lib/supabase/admin": { getSupabaseAdmin: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { payment_flow: null }, error: null }) }) }) }) }) },
+    "@/lib/supabase/admin": { getSupabaseAdmin: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: {
+      payment_flow: null, payment_status: "paid", payment_provider: "manual",
+      paid_at: "2026-10-29T12:00:00Z", price_snapshot: "0.00",
+    }, error: null }) }) }) }) }) },
     "next/server": { NextResponse: { json: (body, init = {}) => ({ body, status: init.status ?? 200 }) } },
     "next/cache": { revalidatePath() {} },
     "@/lib/admin/is-active-admin": { isActiveAdmin: async () => true },

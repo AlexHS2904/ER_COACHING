@@ -139,7 +139,10 @@ test('mark-paid error preserves its business validation response without logging
     '@/lib/admin/is-active-admin': { isActiveAdmin: async () => true },
     '@/lib/supabase/admin': { getSupabaseAdmin: () => ({ from() {
       const query = { select() { return query; }, eq() { return query; },
-        maybeSingle: async () => ({ data: { payment_flow: null }, error: null }) };
+        maybeSingle: async () => ({ data: {
+          payment_flow: null, payment_status: 'paid', payment_provider: 'manual',
+          paid_at: '2026-10-29T12:00:00Z', price_snapshot: '0.00',
+        }, error: null }) };
       return query;
     } }) },
     '@/lib/intake/activate-booking-intake': { activateBookingIntake: async () => { throw error; } },

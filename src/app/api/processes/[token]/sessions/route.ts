@@ -16,6 +16,7 @@ import {
 } from "@/lib/google/calendar";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
 import { enforcePublicAbuse } from "@/lib/security/public-abuse";
+import { serviceRequiresPayment } from "@/lib/bookings/payment-policy";
 
 import {
   getSupabaseAdmin,
@@ -107,6 +108,47 @@ export async function POST(
       hashProcessAccessToken(
         token,
       );
+
+    // A package access token grants scheduling only after its initial paid
+    // booking has a server-recorded Stripe payment. Process status alone is
+    // insufficient because the legacy package RPC creates it as active.
+    const { data: process, error: processReadError } = await supabase
+      .from("coaching_processes")
+      .select("id")
+      .eq("access_token_hash", tokenHash)
+      .maybeSingle();
+
+    if (processReadError) {
+      return NextResponse.json(
+        { error: "No fue posible verificar el pago del proceso." },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (process) {
+      const { data: initialBooking, error: paymentReadError } = await supabase
+        .from("bookings")
+        .select("price_snapshot,payment_status,payment_provider,paid_at")
+        .eq("process_id", process.id)
+        .eq("package_session_number", 1)
+        .maybeSingle();
+
+      if (paymentReadError) {
+        return NextResponse.json(
+          { error: "No fue posible verificar el pago del proceso." },
+          { status: 503, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (!initialBooking || (serviceRequiresPayment(initialBooking.price_snapshot) &&
+          (initialBooking.payment_status !== "paid" ||
+           initialBooking.payment_provider !== "stripe" || !initialBooking.paid_at))) {
+        return NextResponse.json(
+          { code: "payment_required", error: "Este proceso requiere un pago confirmado antes de agendar sesiones." },
+          { status: 409, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
 
     /* =====================================================
        2. LEER BODY

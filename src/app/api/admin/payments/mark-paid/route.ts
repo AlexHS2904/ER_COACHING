@@ -16,6 +16,7 @@ import {
 } from "@/lib/intake/activate-booking-intake";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { serviceRequiresPayment } from "@/lib/bookings/payment-policy";
 
 type Body = {
   bookingId?:
@@ -70,13 +71,21 @@ export async function POST(
         request.url,
       ).origin;
 
-    const booking = await getSupabaseAdmin().from("bookings").select("payment_flow")
+    const booking = await getSupabaseAdmin().from("bookings")
+      .select("payment_flow,payment_status,payment_provider,paid_at,price_snapshot")
       .eq("id", body.bookingId.trim()).maybeSingle();
     if (booking.error || !booking.data) {
       return NextResponse.json({ error: "Reserva no encontrada." }, { status: 404 });
     }
     if (booking.data.payment_flow === "stripe") {
       return NextResponse.json({ error: "El pago de esta reserva debe confirmarse mediante Stripe." }, { status: 409 });
+    }
+    if (serviceRequiresPayment(booking.data.price_snapshot) &&
+        (booking.data.payment_status !== "paid" || booking.data.payment_provider !== "stripe" || !booking.data.paid_at)) {
+      return NextResponse.json(
+        { error: "Los servicios con pago requerido solo pueden confirmarse con el pago de Stripe registrado." },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const result =

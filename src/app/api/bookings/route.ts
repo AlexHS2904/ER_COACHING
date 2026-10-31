@@ -12,6 +12,7 @@ import { isStripeTestCheckoutEnabled } from "@/lib/stripe/server";
 import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 import { createBookingAccess, hashBookingAccess, bookingAccessCookie, bookingCookieOptions } from "@/lib/stripe/access";
 import { hasCurrentBookingAcceptance } from "@/lib/legal/acceptance";
+import { canUsePublicStripeCheckout, serviceRequiresPayment } from "@/lib/bookings/payment-policy";
 
 /* =========================================================
    TYPES
@@ -325,7 +326,9 @@ export async function POST(
           slug,
           name,
           booking_enabled,
-          requires_quote
+          requires_quote,
+          price,
+          session_count
         `,
       )
       .eq(
@@ -377,8 +380,14 @@ export async function POST(
        8. CREAR BOOKING / PROCESO
     ===================================================== */
 
-    if (isStripeTestCheckoutEnabled() && service.service_type === "single" && service.slug === "sesion-1-1") {
-      return NextResponse.json({ code: "checkout_required", error: "Esta sesión requiere completar el pago en Checkout." }, { status: 409 });
+    if (serviceRequiresPayment(service.price)) {
+      const checkoutAvailable = canUsePublicStripeCheckout(service, isStripeTestCheckoutEnabled());
+      return NextResponse.json(
+        checkoutAvailable
+          ? { code: "checkout_required", error: "Este servicio requiere completar el pago en Checkout." }
+          : { code: "payment_unavailable", error: "El pago en línea no está disponible para este servicio. No se creó una reserva." },
+        { status: checkoutAvailable ? 409 : 503, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     let bookingResult:
@@ -630,6 +639,10 @@ export async function POST(
           starts_at,
           ends_at,
 
+          payment_status,
+          payment_provider,
+          paid_at,
+
           status
         `,
       )
@@ -672,6 +685,27 @@ export async function POST(
         {
           status: 500,
         },
+      );
+    }
+
+    // Defense in depth: the RPC's immutable price snapshot is the final
+    // server-side check before this legacy path can create Calendar/email
+    // side effects. Paid services must go through the Stripe webhook flow.
+    if (
+      serviceRequiresPayment(booking.price_snapshot) &&
+      (booking.payment_status !== "paid" || booking.payment_provider !== "stripe" || !booking.paid_at)
+    ) {
+      await supabase
+        .from("bookings")
+        .update({
+          status: "cancelled",
+          integration_error: "El servicio requiere pago de Stripe antes de confirmar la reserva.",
+        })
+        .eq("id", createdBookingId);
+      await cancelCreatedProcess();
+      return NextResponse.json(
+        { code: "payment_required", error: "Este servicio requiere pago confirmado antes de completar la reserva." },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
       );
     }
 
