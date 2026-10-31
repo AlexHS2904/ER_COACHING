@@ -19,6 +19,22 @@ export type PublicAbuseGroup =
 
 const RULE_ID = "er-public-abuse-v1";
 const RETRY_AFTER_SECONDS = 60;
+const PRODUCTION_FIREWALL_HOST = "www.ednarojocoaching.com";
+
+function firewallHost(): string | null {
+  if (process.env.VERCEL_ENV === "production") {
+    // This project's public canonical domain serves its production Firewall.
+    // Generated deployment URLs may require SSO even when this domain does not.
+    // No browser header or application URL variable chooses this destination.
+    return PRODUCTION_FIREWALL_HOST;
+  }
+  if (process.env.VERCEL_ENV === "preview") {
+    const host = process.env.VERCEL_URL ?? "";
+    return host.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+vercel\.app$/i.test(host)
+      ? host.toLowerCase() : null;
+  }
+  return null;
+}
 
 function unavailable(): Response {
   return Response.json(
@@ -53,18 +69,18 @@ export async function enforcePublicAbuse(
   if (process.env.NODE_ENV !== "production") return null;
 
   const secret = process.env.RATE_LIMIT_SECRET;
-  const host = process.env.VERCEL_URL ?? "";
+  const host = firewallHost();
   const ip = request.headers.get("x-vercel-forwarded-for")?.trim() ?? "";
 
-  // Vercel supplies these values. Do not use a caller-controlled Host/XFF fallback.
+  // Trust only this project's canonical host/Vercel preview host and provider IP.
+  // Never use a caller-controlled Host/XFF fallback or guess the environment.
   if (
     process.env.VERCEL !== "1" ||
     !secret ||
     secret.length < 32 ||
     secret.length > 4096 ||
     /\s/.test(secret) ||
-    host.length > 253 ||
-    !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+vercel\.app$/i.test(host) ||
+    !host ||
     isIP(ip) === 0 ||
     (identity !== undefined && (identity.length === 0 || identity.length > 2048))
   ) {

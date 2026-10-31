@@ -6,8 +6,10 @@ import { testModules } from './helpers/load-typescript.mjs';
 const ruleId = 'er-public-abuse-v1';
 const secret = 'fixture-only-rate-limit-secret-'.repeat(2);
 const ip = '203.0.113.20';
-const host = 'coaching-fixture.vercel.app';
-const env = { NODE_ENV: 'production', VERCEL: '1', VERCEL_URL: host, RATE_LIMIT_SECRET: secret };
+const host = 'www.ednarojocoaching.com';
+const generatedHost = 'coaching-fixture.vercel.app';
+const env = { NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'production',
+  VERCEL_URL: generatedHost, RATE_LIMIT_SECRET: secret };
 
 function request(address = ip, extra = {}) {
   return { headers: new Headers({ 'x-vercel-forwarded-for': address, ...extra }) };
@@ -127,12 +129,6 @@ test('provider firewall denial returns the same public 429 without private detai
 
 for (const [label, environment] of [
   ['not running on Vercel', { VERCEL: undefined }],
-  ['missing provider hostname', { VERCEL_URL: undefined }],
-  ['external provider hostname', { VERCEL_URL: 'attacker.example' }],
-  ['URL instead of hostname', { VERCEL_URL: 'https://coaching.vercel.app' }],
-  ['hostname with credentials', { VERCEL_URL: 'user@coaching.vercel.app' }],
-  ['hostname with port', { VERCEL_URL: 'coaching.vercel.app:443' }],
-  ['hostname suffix attack', { VERCEL_URL: 'coaching.vercel.app.attacker.example' }],
   ['missing secret', { RATE_LIMIT_SECRET: undefined }],
   ['short secret', { RATE_LIMIT_SECRET: 'short-fixture' }],
   ['whitespace in secret', { RATE_LIMIT_SECRET: `${secret} ` }],
@@ -140,6 +136,49 @@ for (const [label, environment] of [
   test(`production configuration rejects ${label} before any provider request`, async () => {
     const f = fixture({ environment });
     assert.equal((await f.enforce(request(), 'contact')).status, 503);
+    assert.deepEqual(f.calls, []);
+  });
+}
+
+for (const [label, site] of [['missing', undefined], ['localhost', 'http://localhost:3000'],
+  ['external', 'https://attacker.example'], ['malformed', 'not-a-url']]) {
+  test(`production destination is fixed even when the application URL is ${label}`, async () => {
+    const f = fixture({ environment: { NEXT_PUBLIC_SITE_URL: site } });
+    assert.equal(await f.enforce(request(), 'availability-read'), null);
+    assert.equal(f.calls[0].options.headers.get('host'), host);
+  });
+}
+
+test('production uses the trusted canonical domain instead of a protected or missing generated hostname', async () => {
+  for (const deploymentHost of [generatedHost, undefined, 'attacker.example', 'https://attacker.example']) {
+    const f = fixture({ environment: { VERCEL_URL: deploymentHost } });
+    assert.equal(await f.enforce(request(ip, { host: 'attacker.example', 'x-forwarded-host': 'attacker.example' }), 'availability-read'), null);
+    assert.equal(f.calls[0].options.headers.get('host'), host);
+  }
+});
+
+test('preview retains its Vercel deployment hostname and never falls back to production', async () => {
+  const f = fixture({ environment: { VERCEL_ENV: 'preview', NEXT_PUBLIC_SITE_URL: undefined } });
+  assert.equal(await f.enforce(request(ip, { host }), 'availability-read'), null);
+  assert.equal(f.calls[0].options.headers.get('host'), generatedHost);
+});
+
+for (const [label, previewHost] of [
+  ['missing hostname', undefined], ['external hostname', 'attacker.example'],
+  ['URL instead of hostname', `https://${generatedHost}`], ['credentials', `user@${generatedHost}`],
+  ['port', `${generatedHost}:443`], ['suffix attack', `${generatedHost}.attacker.example`],
+]) {
+  test(`preview fails closed for ${label} without using the production domain`, async () => {
+    const f = fixture({ environment: { VERCEL_ENV: 'preview', VERCEL_URL: previewHost } });
+    assert.equal((await f.enforce(request(), 'availability-read')).status, 503);
+    assert.deepEqual(f.calls, []);
+  });
+}
+
+for (const deploymentEnvironment of [undefined, 'development', 'custom-production']) {
+  test(`an unknown production runtime environment fails closed (${deploymentEnvironment})`, async () => {
+    const f = fixture({ environment: { VERCEL_ENV: deploymentEnvironment } });
+    assert.equal((await f.enforce(request(), 'availability-read')).status, 503);
     assert.deepEqual(f.calls, []);
   });
 }

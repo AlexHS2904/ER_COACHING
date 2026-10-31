@@ -21,8 +21,14 @@ Cada operación exige primero cuota por IP y después, cuando corresponde, cuota
 por recurso/identidad. Cambiar booking_reference/email/token no elude la cuota
 IP. Las claves son HMAC-SHA256 con un secreto server-only; no se envían al
 proveedor emails, tokens, cookies ni URLs privadas. Solo se pasan al SDK el
-host de `VERCEL_URL` y la IP que Vercel proporciona en `x-vercel-forwarded-for`.
-No se confía en el Host ni en forwarding headers alternativos del cliente.
+host validado del proyecto y la IP que Vercel proporciona en
+`x-vercel-forwarded-for`. En Production, el host es la constante server-only
+`www.ednarojocoaching.com`, el único dominio canónico autorizado del proyecto.
+No se añade una dependencia de `NEXT_PUBLIC_SITE_URL` ni se deriva el destino
+de headers del cliente. En Preview se conserva el host generado de
+`VERCEL_URL`, limitado a un hostname válido de `vercel.app`. Un entorno
+desconocido o una configuración inválida falla cerrado. No se confía en el
+Host ni en forwarding headers alternativos del cliente.
 
 Exceso devuelve 429 genérico, no-store y Retry-After: 60. Regla ausente,
 configuración inválida o fallo del proveedor devuelve 503 genérico antes de
@@ -48,16 +54,39 @@ próximo deploy autorizado:
 2. Settings → Environment Variables: añadir `RATE_LIMIT_SECRET` nuevo,
    aleatorio (al menos 32 bytes; por ejemplo 64 caracteres hex), Sensitive y
    server-only, Production/Preview. Nunca NEXT_PUBLIC ni reutilizar otra clave.
-   No pegar el valor en chat o documentación.
-3. Exponer las variables de sistema de Vercel para disponer de `VERCEL` y
-   `VERCEL_URL`. El SDK consulta la URL del deployment. Si está protegida
-   (también ocurre con Standard Protection en deployments de producción),
-   Settings → Deployment Protection → Protection Bypass for Automation:
-   configurar el bypass oficial y su `VERCEL_AUTOMATION_BYPASS_SECRET`
-   server-only. El SDK lo adjunta automáticamente; no pasar cookies privadas.
+   No pegar el valor en chat o documentación. El secreto se configura en el
+   scope de Vercel correspondiente; no hace falta copiarlo a `.env.local`.
+3. En el proyecto → Environment Variables, comprobar la casilla
+   `Enable access to System Environment Variables` para disponer de `VERCEL`,
+   `VERCEL_ENV` y, para Preview, `VERCEL_URL`. En Production, el SDK consulta
+   directamente la constante server-only `www.ednarojocoaching.com`, dominio
+   público del mismo proyecto. No necesita una nueva variable de sitio ni
+   utiliza la URL generada del deployment, que puede exigir
+   SSO aunque el dominio canónico sea público. Esta configuración no requiere
+   añadir un bypass de automatización a Production. En Preview se utiliza
+   `VERCEL_URL`; si ese deployment está protegido, configurar el mecanismo
+   oficial en Settings → Deployment Protection → Protection Bypass for
+   Automation y su `VERCEL_AUTOMATION_BYPASS_SECRET` server-only en el scope
+   necesario. El SDK lo adjunta automáticamente; no pasar cookies privadas
+   ni relajar la protección de endpoints administrativos.
 4. La regla fue publicada manualmente por el responsable. Esta revisión no
    ejecutó cambios remotos ni deploy: el guard de aplicación estará operativo
    en el hosting con el siguiente deploy aprobado y su configuración requerida.
+
+### Nota del 30 de octubre de 2026 — ajuste preparado tras el smoke de hosting
+
+El primer smoke de hosting detectó respuestas 503 del guard: la consulta del
+SDK al hostname generado del deployment encontraba la protección SSO, mientras
+el dominio canónico público respondía normalmente. El responsable confirmó
+`RATE_LIMIT_SECRET` en Production y la regla publicada; este incidente no
+demuestra que falte el secreto ni exige una copia local.
+
+Se preparó el ajuste de selección de host descrito arriba, manteniendo cuotas,
+HMAC, respuestas 429/503 y el cierre seguro ante errores. Esta nota documenta
+el cambio preparado; no afirma que se haya realizado un segundo deploy ni que
+el smoke del guard corregido en hosting haya pasado. Su publicación y prueba
+quedan sujetas a la validación y autorización correspondientes. El veredicto
+histórico **READY FOR LEGAL** de esta fase se conserva.
 
 ## Logging
 
