@@ -5,7 +5,7 @@ import Footer from "@/components/publico/Footer";
 import BookingFlow from "@/components/publico/reservar/BookingFlow";
 
 import { getActiveServices } from "@/lib/data/services";
-import { isStripeTestCheckoutEnabled } from "@/lib/stripe/server";
+import { assertStripeCatalogReady, getVerifiedStripeContext, isStripeCheckoutEnabled, verifyImmediatePaymentMethods } from "@/lib/stripe/server";
 import { isBookingId } from "@/lib/stripe/access";
 
 export const metadata: Metadata = {
@@ -31,6 +31,15 @@ export default async function BookingPage({
   const bookableServices = services.filter(
     (item) => item.booking_enabled,
   );
+  let checkoutEnabled = false;
+  if (isStripeCheckoutEnabled()) {
+    try {
+      const { config, stripe } = await getVerifiedStripeContext({ forNewSale: true });
+      await verifyImmediatePaymentMethods(stripe, config);
+      await assertStripeCatalogReady();
+      checkoutEnabled = true;
+    } catch { /* Missing/discrepant configuration keeps both products paused. */ }
+  }
 
   return (
     <>
@@ -40,7 +49,7 @@ export default async function BookingPage({
         <BookingFlow
           services={bookableServices}
           initialServiceSlug={service}
-          stripeCheckoutEnabled={isStripeTestCheckoutEnabled()}
+          stripeCheckoutEnabled={checkoutEnabled}
           reservationRestartId={isBookingId(restart) ? restart : undefined}
         />
       </main>

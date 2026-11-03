@@ -195,6 +195,12 @@ export default function ServicesCatalog({
                   </p>
 
                   {/* Precio */}
+                  {service.service_type === "package" && service.session_count === 6 && (
+                    <p className="mt-4 text-sm leading-6 text-brand-brown/65">
+                      6 sesiones de 90 minutos. Vigencia de 90 días naturales desde el pago.
+                      Cancelación con menos de 24 h: revisión de Edna. Inasistencia sin aviso: sesión utilizada, salvo excepción autorizada o derechos legales.
+                    </p>
+                  )}
 
                   <div className="mt-8 border-t border-brand-taupe/25 pt-6">
                     <div className="flex items-end gap-2">

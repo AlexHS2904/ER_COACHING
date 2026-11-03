@@ -78,11 +78,11 @@ test("payment policy fails closed for paid, malformed and unknown prices", () =>
   assert.equal(paymentPolicy.serviceRequiresPayment(0), false);
   assert.equal(paymentPolicy.serviceRequiresPayment("0.00"), false);
   assert.equal(paymentPolicy.canUsePublicStripeCheckout({
-    slug: "sesion-1-1", service_type: "single", session_count: 1,
+    slug: "sesion-1-1", service_type: "single", session_count: 1, price:500,
   }, true), true);
   assert.equal(paymentPolicy.canUsePublicStripeCheckout({
-    slug: "proceso", service_type: "package", session_count: 6,
-  }, true), false);
+    slug: "proceso", service_type: "package", session_count: 6, price:2500,
+  }, true), true);
 });
 
 for (const service of [
@@ -157,8 +157,12 @@ function processSessionFixture({ paid = false, price = 2500, missingBooking = fa
         eq() { return this; },
         async maybeSingle() {
           calls.push({ read: table });
-          if (table === "coaching_processes") return { data: { id: "process-id" }, error: null };
+          if (table === "coaching_processes") return { data: { id: "process-id", status: "active", total_sessions: 6,
+            purchase_booking_id: "purchase-id", stripe_mode: "test", stripe_account_id: "acct_fixture" }, error: null };
           if (table === "bookings") return { data: missingBooking ? null : {
+            id: "purchase-id", process_id: "process-id", package_session_number: 1,
+            payment_flow: "stripe", payment_reference: paid ? "pi_fixture" : null,
+            stripe_mode: "test", stripe_account_id: "acct_fixture",
             price_snapshot: price, payment_status: paid ? "paid" : "pending",
             payment_provider: paid ? "stripe" : null, paid_at: paid ? "2035-01-01T00:00:00Z" : null,
           }, error: null };
@@ -173,7 +177,9 @@ function processSessionFixture({ paid = false, price = 2500, missingBooking = fa
   };
   const modules = testModules({
     "next/server": { NextResponse: { json: jsonResponse } },
-    "@/lib/coaching/process-access": { hashProcessAccessToken: () => "process-hash" },
+    "@/lib/coaching/process-access": { hashProcessAccessToken: () => "process-hash", processSessionBookingAccess: () => "b".repeat(64) },
+    "@/lib/bookings/finalize-paid-booking": { finalizePaidBooking: async () => { calls.push("finalizer"); } },
+    "@/lib/stripe/server": { getStripeConfig: () => ({ mode: "test", accountId: "acct_fixture", siteUrl: "https://fixture.test" }), assertStripeRecordScope() {} },
     "@/lib/security/public-abuse": { enforcePublicAbuse: async () => null },
     "@/lib/supabase/admin": { getSupabaseAdmin: () => db },
     "@/lib/google/safe-error": { googleErrorLogMetadata: error => ({ message: error?.message }) },
@@ -183,7 +189,7 @@ function processSessionFixture({ paid = false, price = 2500, missingBooking = fa
   return {
     calls,
     route: modules.load("src/app/api/processes/[token]/sessions/route.ts"),
-    request: { json: async () => ({ startsAt: "2035-01-01T12:00:00Z" }) },
+    request: { headers: new Headers({ origin: "https://fixture.test" }), json: async () => ({ startsAt: "2035-01-01T12:00:00Z", requestId: "22222222-2222-4222-8222-222222222222" }) },
     context: { params: Promise.resolve({ token: processToken }) },
   };
 }
@@ -200,11 +206,11 @@ test("package session endpoint rejects unpaid or unverifiable initial booking be
   }
 });
 
-test("package session endpoint reaches the existing RPC for a recorded Stripe-paid package", async () => {
+test("package session endpoint reaches the scoped RPC for a recorded Stripe-paid package", async () => {
   const f = processSessionFixture({ paid: true });
   const response = await f.route.POST(f.request, f.context);
   assert.equal(response.status, 409); // the fixture RPC reports an unavailable slot
-  assert.equal(f.calls.some(call => call.rpc === "create_process_session"), true);
+  assert.equal(f.calls.some(call => call.rpc === "create_stripe_process_session_v1"), true);
   assert.equal(f.calls.includes("calendar"), false);
   assert.equal(f.calls.includes("email"), false);
 });

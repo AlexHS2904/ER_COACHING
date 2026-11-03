@@ -148,6 +148,7 @@ for (const path of legalPaths) {
 }
 
 const react = {
+  useRef: initial => ({current:initial}),
   useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect() {},
   useMemo: callback => callback(),

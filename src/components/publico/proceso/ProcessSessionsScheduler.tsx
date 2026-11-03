@@ -4,6 +4,7 @@ import {
   type FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -135,6 +136,7 @@ export default function ProcessSessionScheduler({
 }: Props) {
   const router =
     useRouter();
+  const sessionRequest = useRef<{ startsAt: string; id: string } | null>(null);
 
   const today =
     useMemo(
@@ -300,6 +302,12 @@ export default function ProcessSessionScheduler({
         true,
       );
 
+      // Preserve the nonce after a lost response. Changing slots starts a
+      // different operation; retries for the same slot reuse the entitlement.
+      if (sessionRequest.current?.startsAt !== selectedSlot.starts_at) {
+        sessionRequest.current = { startsAt: selectedSlot.starts_at, id: crypto.randomUUID() };
+      }
+
       const response =
         await fetch(
           `/api/processes/${encodeURIComponent(
@@ -318,6 +326,7 @@ export default function ProcessSessionScheduler({
               JSON.stringify({
                 startsAt:
                   selectedSlot.starts_at,
+                requestId: sessionRequest.current.id,
               }),
           },
         );

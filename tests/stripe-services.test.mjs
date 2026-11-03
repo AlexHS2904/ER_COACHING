@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -8,7 +9,7 @@ import { testModules } from "./helpers/load-typescript.mjs";
 const id="11111111-1111-4111-8111-111111111111";
 const attemptId="22222222-2222-4222-8222-222222222222";
 const site="http://localhost:3000";
-const env={NEXT_PUBLIC_SITE_URL:site,NEXT_PUBLIC_SUPABASE_URL:"http://127.0.0.1:54321",STRIPE_SECRET_KEY:"sk_test_fake_unit_only"};
+const env={NEXT_PUBLIC_SITE_URL:site,NEXT_PUBLIC_SUPABASE_URL:"http://127.0.0.1:54321",STRIPE_SECRET_KEY:"sk_test_fake_unit_only",STRIPE_MODE:"test",STRIPE_EXPECTED_ACCOUNT_ID:"acct_fixture",PAID_BOOKINGS_ENABLED:"true",STRIPE_PAYMENT_METHOD_CONFIGURATION_ID:"pmc_fixture",STRIPE_WEBHOOK_SECRET:"whsec_fixture_signature_not_real",STRIPE_LOCAL_WORKER_SECRET:"fixture-local-worker-secret-not-real-123"};
 const response=(data,init={})=>({data,status:init.status??200});
 const SDKStripe = createRequire(import.meta.url)("stripe");
 
@@ -47,30 +48,25 @@ test("Stripe rejects live keys and unapproved remote database/site configuration
   }
 });
 
-test("ER_COACHING accepts test keys only while the app remains local",()=>{
-  for (const [changes,enabled] of [
-    [{},true], [{STRIPE_SECRET_KEY:'sk_live_fake_rejected'},false],
-    [{NEXT_PUBLIC_SITE_URL:'https://example.test'},false],
-  ]) {
-    const modules=testModules({'@/lib/supabase/admin':{}},{...env,
-      NEXT_PUBLIC_SUPABASE_URL:'https://rysgpojjhiljrrwtjguy.supabase.co',...changes});
-    assert.equal(modules.load('src/lib/stripe/server.ts').isStripeTestCheckoutEnabled(),enabled);
-  }
+test("Test sales never share ER_COACHING production database",()=>{
+  const modules=testModules({'@/lib/supabase/admin':{}},{...env,
+    NEXT_PUBLIC_SUPABASE_URL:'https://rysgpojjhiljrrwtjguy.supabase.co'});
+  assert.equal(modules.load('src/lib/stripe/server.ts').isStripeCheckoutEnabled(),false);
 });
 
 function checkoutFixture({known=false,failOnce=false,sessionChanges={},creationError=null,requestCount=1,
   firstDispatch=true,saveError=null,recordError=null,retrieveError=null}={}) {
   const calls={create:[],retrieve:0,update:[],rpc:[]}; let failures=failOnce?1:0;
   const listeners=new Set(); let first=firstDispatch;
-  const booking={id,booking_reference:"TEST-1",price_snapshot:"500.00",currency_snapshot:"MXN"};
-  const storedPayload={mode:"payment",payment_method_types:["card"],expires_at:12345,
+  const booking={...stripeFixtureScope,id,booking_reference:"TEST-1",price_snapshot:"500.00",currency_snapshot:"MXN"};
+  const storedPayload={payment_method_configuration:"pmc_fixture",mode:"payment",payment_method_types:["card"],expires_at:12345,
     line_items:[{quantity:1,price_data:{currency:'mxn',unit_amount:50000,product_data:{name:'Sesión 1:1'}}}],
-    client_reference_id:id,metadata:{booking_id:id,payment_attempt_id:attemptId,booking_reference:'TEST-1'},
+    client_reference_id:id,metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,payment_attempt_id:attemptId,booking_reference:'TEST-1'},
     success_url:`${site}/reservar/confirmada?booking=${id}&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url:`${site}/reservar/confirmada?booking=${id}`};
-  const attempt={id:attemptId,amount_minor:"50000",currency:"mxn",stripe_checkout_session_id:known?"cs_test_fixed":null,checkout_payload:storedPayload};
-  const session={id:"cs_test_fixed",livemode:false,mode:"payment",status:"open",payment_status:"unpaid",amount_total:50000,currency:"mxn",client_reference_id:id,
-    metadata:{booking_id:id,booking_reference:"TEST-1",payment_attempt_id:attemptId},url:"https://checkout.stripe.com/c/pay/cs_test_fixed",expires_at:2100000000,...sessionChanges};
+  const attempt={...stripeFixtureScope,id:attemptId,amount_minor:"50000",currency:"mxn",stripe_checkout_session_id:known?"cs_test_fixed":null,checkout_payload:storedPayload};
+  const session={id:"cs_test_fixed",livemode:false,payment_method_types:["card"],mode:"payment",status:"open",payment_status:"unpaid",amount_total:50000,currency:"mxn",client_reference_id:id,
+    metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,booking_reference:"TEST-1",payment_attempt_id:attemptId},url:"https://checkout.stripe.com/c/pay/cs_test_fixed",expires_at:2100000000,...sessionChanges};
   const stripe={on(event,fn){listeners.add(fn);},off(event,fn){listeners.delete(fn);},checkout:{sessions:{
     async create(payload,options){
       calls.create.push({payload,options});
@@ -82,15 +78,15 @@ function checkoutFixture({known=false,failOnce=false,sessionChanges={},creationE
   }}};
   const db={async rpc(name,args){
     calls.rpc.push({name,args});
-    if(name==='claim_stripe_checkout_v1')return {data:{booking,attempt},error:null};
-    if(name==='begin_stripe_checkout_creation_v1'){const data=first;first=false;return {data,error:null};}
-    if(name==='record_stripe_checkout_failure_v1'){
+    if(name==='claim_stripe_checkout_v2')return {data:{booking,attempt},error:null};
+    if(name==='begin_stripe_checkout_creation_v2'){const data=first;first=false;return {data,error:null};}
+    if(name==='record_stripe_checkout_failure_v2'){
       calls.update.push({status:args.p_status,last_error:args.p_error});return {data:!recordError,error:recordError};
     }
-    if(name==='save_stripe_checkout_v1'&&saveError)throw saveError;
+    if(name==='save_stripe_checkout_v2'&&saveError)throw saveError;
     return {data:true,error:null};},
     from(){return {update(value){calls.update.push(value);return {eq(){return this;},async in(){return {error:null};}};}};}};
-  const modules=testModules({"@/lib/stripe/server":{getStripeBookingAdmin:()=>db,getStripeTestClient:()=>stripe,getStripeTestSiteUrl:()=>site},"@/lib/stripe/expire-hold":{expireStripeBookingHold:async()=>false}});
+  const modules=testModules({'@/lib/stripe/server':stripeRuntimeFixture(db,stripe),"@/lib/stripe/expire-hold":{expireStripeBookingHold:async()=>false}});
   return {...modules.load("src/lib/stripe/checkout.ts"),calls,storedPayload,listeners};
 }
 test('Checkout omits legacy payment methods without changing stored payload or financial/redirect fields',async()=>{
@@ -124,7 +120,7 @@ test('already bound paid Session requests reconciliation without another creatio
   const f=checkoutFixture({known:true,sessionChanges:{status:'complete',payment_status:'paid',url:null}});
   await assert.rejects(f.createOrRecoverCheckout(id,'a'.repeat(64)),error=>error.code==='already_paid');
   assert.equal(f.calls.retrieve,1);assert.equal(f.calls.create.length,0);
-  assert.deepEqual(f.calls.rpc.map(call=>call.name),['claim_stripe_checkout_v1']);
+  assert.deepEqual(f.calls.rpc.map(call=>call.name),['claim_stripe_checkout_v2']);
   assert.deepEqual(f.calls.update,[]);
 });
 
@@ -134,7 +130,7 @@ test('paid idempotency replay binds a previously unbound Session before requesti
   assert.equal(f.calls.retrieve,0);assert.equal(f.calls.create.length,1);
   assert.equal(f.calls.create[0].options.idempotencyKey,`booking-checkout/${attemptId}`);
   assert.deepEqual(f.calls.rpc.map(call=>call.name),[
-    'claim_stripe_checkout_v1','begin_stripe_checkout_creation_v1','save_stripe_checkout_v1',
+    'claim_stripe_checkout_v2','begin_stripe_checkout_creation_v2','save_stripe_checkout_v2',
   ]);
   const [claim,,save]=f.calls.rpc;
   assert.equal(save.args.p_booking_id,id);assert.equal(save.args.p_attempt_id,attemptId);
@@ -148,7 +144,7 @@ test('lost paid Session binding remains unknown and cannot claim successful reco
   await assert.rejects(f.createOrRecoverCheckout(id,'a'.repeat(64)),error=>error.code==='checkout_unavailable');
   assert.equal(f.calls.create.length,1);
   assert.deepEqual(f.calls.update,[{status:'unknown',last_error:'stripe_request_unknown'}]);
-  assert.equal(f.calls.rpc.filter(call=>call.name==='save_stripe_checkout_v1').length,1);
+  assert.equal(f.calls.rpc.filter(call=>call.name==='save_stripe_checkout_v2').length,1);
 });
 
 for(const [label,error,status] of [
@@ -164,7 +160,7 @@ for(const [label,error,status] of [
   const f=checkoutFixture({creationError:error});
   await assert.rejects(f.createOrRecoverCheckout(id,'a'.repeat(64)));
   assert.equal(f.calls.update[0].status,status);
-  assert.equal(f.calls.rpc.some(r=>r.name==='save_stripe_checkout_v1'),false);
+  assert.equal(f.calls.rpc.some(r=>r.name==='save_stripe_checkout_v2'),false);
   assert.equal(f.listeners.size,0);
 });
 
@@ -236,14 +232,14 @@ test("pending Meet never creates a second Calendar event",async()=>{
 });
 
 function finalizerFixture({googleFails=0,meetPending=0,emailFails=null,intakeFails=0,cancelled=false,review=false}={}) {
-  const b={id,booking_reference:"TEST-1",payment_flow:"stripe",payment_status:"paid",status:cancelled?"cancelled":"pending",
+  const b={...stripeFixtureScope,id,booking_reference:"TEST-1",payment_flow:"stripe",payment_status:"paid",status:cancelled?"cancelled":"pending",
     finalization_status:review?"review_required":"pending",payment_reference:"pi_test",service_name_snapshot:"Sesión 1:1",customer_name:"Test",customer_email:"test@example.test",customer_phone:null,
     starts_at:calendarInput.startsAt,ends_at:calendarInput.endsAt,duration_minutes_snapshot:90,session_count_snapshot:1,price_snapshot:500,currency_snapshot:"MXN",notes:null,
     google_event_id:null,google_meet_url:null,google_calendar_url:null,customer_email_id:null,coach_email_id:null};
   const calls={calendar:0,created:0,customer:0,coach:0,intake:0,intakeEmail:0},intakeArguments=[];
   let ready=false,formId=null,owner=null,failMail=emailFails;
   const db={async rpc(name,args){
-    if(name==="claim_stripe_finalization_v1") {
+    if(name==="claim_stripe_finalization_v2") {
       if(owner||b.status==="cancelled"||["review_required","completed"].includes(b.finalization_status))return {data:null,error:null};
       owner=args.p_owner;b.finalization_status="processing";return {data:{...b},error:null};
     }
@@ -257,7 +253,7 @@ function finalizerFixture({googleFails=0,meetPending=0,emailFails=null,intakeFai
     return {data:{...b},error:null};
   },from(){return {select(){return {eq(){return {maybeSingle:async()=>({data:ready?{ready_email_sent_at:new Date().toISOString()}:null,error:null})};}};}};}};
   const modules=testModules({
-    "@/lib/stripe/server":{getStripeBookingAdmin:()=>db,getStripeTestSiteUrl:()=>site},
+    '@/lib/stripe/server':stripeRuntimeFixture(db),
     "@/lib/google/calendar":{async ensurePaidBookingCalendar(input){calls.calendar++;if(googleFails-->0)throw new Error("simulated Google failure");if(!input.existingEventId)calls.created++;return {eventId:"stable-event",meetUrl:meetPending-->0?null:"https://meet.google.com/test-only",calendarUrl:"https://calendar.google.com/test-only"};}},
     "@/lib/email/send-booking-emails":{async sendBookingEmails(input){const who=input.recipients[0];calls[who]++;if(failMail===who){failMail=null;return {[who]:{id:null,error:"failure"}};}return {[who]:{id:`email-${who}`,error:null}};}},
     "@/lib/intake/activate-booking-intake":{async activateBookingIntake(args){intakeArguments.push(args);calls.intake++;if(intakeFails-->0)throw new Error("intake unavailable");if(!formId)formId="same-intake";if(!ready&&args.sendReadyEmail!==false){calls.intakeEmail++;ready=true;}return {formId,emailSent:ready,canonicalIntakeUrl:"http://localhost:3000/formulario/test-only",redirectIntakeUrl:"http://localhost:3000/formulario/test-only",intakeStatus:"active",submittedAt:null};}},
@@ -268,7 +264,7 @@ test("renamed booking keeps the finalizer intake interface and payment reference
   const f=finalizerFixture();f.b.service_name_snapshot="Consulta con nombre nuevo";
   const result=await f.finalizePaidBooking(id);
   assert.equal(result.completed,true);
-  assert.deepEqual(f.intakeArguments,[{bookingId:id,provider:"stripe",paymentReference:"pi_test",siteUrl:site,sendReadyEmail:false}]);
+  assert.deepEqual(f.intakeArguments,[{bookingId:id,provider:"stripe",paymentReference:"pi_test",siteUrl:site,sendReadyEmail:false,stripeScope:stripeFixtureConfig,processId:undefined,allowUnavailableProcessIntake:false}]);
 });
 test("finalizer confirms a paid booking and retries do not repeat completed effects",async()=>{
   const f=finalizerFixture(); await f.finalizePaidBooking(id);await f.finalizePaidBooking(id);
@@ -314,7 +310,7 @@ function webhookFixture(){
   let persisted=0,finalized=0;const scheduled=[];
   const modules=testModules({
     "next/server":{NextResponse:{json:response},after:fn=>scheduled.push(fn)},
-    "@/lib/stripe/server":{getStripeTestClient:()=>signingStripe},
+    '@/lib/stripe/server':stripeRuntimeFixture(undefined,signingStripe),
     "@/lib/stripe/webhook":{async applyStripeCheckoutEvent(){persisted++;return {accepted:true,booking_id:id};}},
     "@/lib/bookings/finalize-paid-booking":{async finalizePaidBooking(){finalized++;}},
   },{STRIPE_WEBHOOK_SECRET:signingSecret});
@@ -361,19 +357,19 @@ test("confirmation access requires the correct high-entropy credential, never a 
 
 test("expired unknown Checkout is reconciled read-only, never created after hold deadline",async()=>{
   let creates=0,expires=0,applied=false;
-  const booking={id,payment_flow:"stripe",payment_status:"pending",status:"pending",payment_expires_at:"2020-01-01",finalization_status:"not_started",
+  const booking={...stripeFixtureScope,id,payment_flow:"stripe",payment_status:"pending",status:"pending",payment_expires_at:"2020-01-01",finalization_status:"not_started",
     stripe_expiration_last_attempt_at:null,stripe_expiration_reconciled_at:null};
-  const attempt={id:attemptId,booking_id:id,stripe_checkout_session_id:null,amount_minor:50000,currency:"mxn",created_at:"2020-01-01"};
-  const session={id:"cs_test_recovered",livemode:false,mode:"payment",client_reference_id:id,
-    metadata:{booking_id:id,payment_attempt_id:attemptId},amount_total:50000,currency:"mxn",status:"open",expires_at:2100000000};
+  const attempt={...stripeFixtureScope,id:attemptId,booking_id:id,stripe_checkout_session_id:null,amount_minor:50000,currency:"mxn",created_at:"2020-01-01"};
+  const session={id:"cs_test_recovered",livemode:false,payment_method_types:["card"],mode:"payment",client_reference_id:id,
+    metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,payment_attempt_id:attemptId},amount_total:50000,currency:"mxn",status:"open",expires_at:2100000000};
   const db={from(table){const q={select(){return q;},eq(){return q;},in(){return q;},neq(){return q;},lte(){return q;},order(){return q;},limit(){return q;},update(){return q;},is(){return q;},
     maybeSingle:async()=>({data:table==="bookings"?booking:attempt,error:null}),
     then(resolve){resolve({error:null});}};return q;},
-    async rpc(name,args){assert.equal(name,"expire_stripe_booking_hold_v1");assert.equal(args.p_remote_expired,true);applied=true;return {data:true,error:null};}};
+    async rpc(name,args){assert.equal(name,"expire_stripe_booking_hold_v2");assert.equal(args.p_remote_expired,true);applied=true;return {data:true,error:null};}};
   const stripe={checkout:{sessions:{
     create(){creates++;throw new Error("must not create");},
     async list(){return {data:[session],has_more:false};},async expire(){expires++;return {...session,status:"expired"};},
   }}};
-  const {expireStripeBookingHold}=testModules({"@/lib/stripe/server":{getStripeBookingAdmin:()=>db,getStripeTestClient:()=>stripe}}).load("src/lib/stripe/expire-hold.ts");
+  const {expireStripeBookingHold}=testModules({'@/lib/stripe/server':stripeRuntimeFixture(db,stripe)}).load("src/lib/stripe/expire-hold.ts");
   assert.equal(await expireStripeBookingHold(id),true);assert.equal(creates,0);assert.equal(expires,1);assert.equal(applied,true);
 });

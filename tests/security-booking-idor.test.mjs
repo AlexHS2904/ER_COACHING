@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { testModules } from './helpers/load-typescript.mjs';
@@ -16,7 +17,7 @@ function ownershipFixture(entries) {
   const bookings = new Map([
     [bookingA, { id: bookingA, booking_reference: 'PRIVATE-A', booking_access_token_hash: hash(tokenA) }],
     [bookingB, { id: bookingB, booking_reference: 'PRIVATE-B', booking_access_token_hash: hash(tokenB) }],
-  ].map(([id, value]) => [id, { ...value, status: 'confirmed', payment_status: 'paid', payment_flow: 'stripe',
+  ].map(([id, value]) => [id, { ...stripeFixtureScope, ...value, status: 'confirmed', payment_status: 'paid', payment_flow: 'stripe',
     finalization_status: 'completed', price_snapshot: '500.00', currency_snapshot: 'MXN' }]));
   let form;
   const db = {
@@ -30,7 +31,7 @@ function ownershipFixture(entries) {
         return { data: true, error: null };
       }
       claims.push({ name, args });
-      assert.equal(name, 'claim_stripe_checkout_v1');
+      assert.equal(name, 'claim_stripe_checkout_v2');
       const booking = bookings.get(args.p_booking_id);
       if (!booking || booking.booking_access_token_hash !== args.p_access_token_hash) {
         return { data: null, error: { message: 'invalid_access' } };
@@ -73,7 +74,7 @@ function ownershipFixture(entries) {
     '@/components/publico/Footer': { default: () => null },
     '@/components/publico/reservar/BookingStatusActions': { default: StatusActions },
     '@/lib/supabase/admin': { getSupabaseAdmin: () => db },
-    '@/lib/stripe/server': { getStripeTestSiteUrl: () => site, getStripeTestClient: () => stripe, getStripeBookingAdmin: () => db },
+    '@/lib/stripe/server': stripeRuntimeFixture(db,stripe),
     '@/lib/bookings/finalize-paid-booking': { finalizePaidBooking: async () => { throw new Error('Completed booking must not finalize again'); } },
     '@/lib/stripe/expire-hold': {
       expireDueStripeHolds: async () => { throw new Error('Recovery must not create or expire bookings'); },
@@ -175,6 +176,7 @@ function deniedAdminFixture(identity) {
       updateGoogleCalendarEvent: async () => { calendarCalls++; },
     },
     '@/lib/email/send-booking-change-email': { sendBookingChangeEmail: async () => { emailCalls++; } },
+    '@/lib/bookings/stripe-booking-changes': { requestStripeBookingChange: async () => { assert.fail('Denied user reached Stripe change workflow'); } },
   });
   const jar = new Map([[cookieA, tokenA]]);
   const request = { headers: new Headers({ origin: site }), nextUrl: new URL(`${site}/api/bookings/${bookingB}/reschedule?date=2035-01-01`),

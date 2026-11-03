@@ -7,6 +7,7 @@ import {
 import {
   getProcessByToken,
 } from "@/lib/coaching/get-process-by-token";
+import { nextProcessSessionNumber } from "@/lib/coaching/process-entitlement";
 
 export const metadata = {
   title:
@@ -134,6 +135,8 @@ function getStatusLabel(
 
     case "completed":
       return "Completada";
+    case "no_show":
+      return "Utilizada por inasistencia";
 
     case "cancelled":
       return "Cancelada";
@@ -245,30 +248,27 @@ export default async function ProcessPage({
     process,
     bookings,
     timezone,
+    canSchedule,
   } = data;
 
   /* =======================================================
-     RESERVAS ACTIVAS
+     SESIONES ASIGNADAS
 
-     Una reserva cancelada NO ocupa
-     una sesión del paquete.
+     Una cancelación no devuelve un derecho automáticamente.
+     Los cambios se solicitan a la coach sobre la misma sesión.
   ======================================================= */
 
-  const activeBookings =
-    bookings.filter(
-      (booking) =>
-        booking.status !==
-        "cancelled",
-    );
+  const assignedBookings = process.stripe_mode
+    ? bookings.filter(b => b.session_resolution !== "replacement_approved")
+    : bookings.filter(booking => booking.status !== "cancelled");
 
   const scheduledSessions =
-    activeBookings.length;
+    assignedBookings.length;
 
   const completedSessions =
-    activeBookings.filter(
+    assignedBookings.filter(
       (booking) =>
-        booking.status ===
-        "completed",
+        ["completed", "no_show"].includes(booking.status) || booking.session_resolution === "consumed",
     ).length;
 
   const price =
@@ -295,7 +295,7 @@ export default async function ProcessPage({
           index + 1;
 
         const booking =
-          activeBookings.find(
+          assignedBookings.find(
             (item) =>
               item.package_session_number ===
               sessionNumber,
@@ -317,11 +317,7 @@ export default async function ProcessPage({
      agendarse desde el portal.
   ======================================================= */
 
-  const nextSessionNumber =
-    sessions.find(
-      (session) =>
-        !session.booking,
-    )?.number ?? null;
+  const nextSessionNumber = canSchedule ? nextProcessSessionNumber(process.total_sessions, bookings) : null;
 
   /* =======================================================
      PROGRESO
@@ -558,6 +554,14 @@ export default async function ProcessPage({
           PROCESO COMPLETADO
       ================================================ */}
 
+      {process.expires_at && (
+        <div className="mx-auto max-w-[1120px] px-5 py-6 text-sm leading-6 text-brand-brown/75">
+          <p>Vigencia: hasta el {new Intl.DateTimeFormat("es-MX", { timeZone: "America/Mexico_City", dateStyle: "long", timeStyle: "short" }).format(new Date(process.expires_at))} (hora de Ciudad de México).</p>
+          <p>Seis sesiones de 90 minutos dentro de los 90 días naturales desde el pago. Una cancelación con menos de 24 horas queda en revisión de Edna; la inasistencia sin aviso utiliza la sesión, salvo excepción autorizada o derechos legales.</p>
+          {bookings.some(b => b.session_resolution === "late_cancel_pending") && <p className="mt-2 font-medium">Hay una sesión pendiente de resolución: su derecho permanece reservado mientras Edna revisa el caso.</p>}
+          {Date.parse(process.expires_at) <= Date.now() && <p className="mt-2 font-medium">La vigencia del paquete terminó. Puedes seguir consultando tus sesiones.</p>}
+        </div>
+      )}
       {process.status ===
         "completed" && (
         <section
@@ -658,7 +662,7 @@ export default async function ProcessPage({
                   {
                     process.total_sessions
                   }{" "}
-                  sesiones completadas
+                  sesiones realizadas o utilizadas
                 </span>
               </div>
             </div>
@@ -886,7 +890,7 @@ export default async function ProcessPage({
               {
                 process.total_sessions
               }{" "}
-              completadas
+              realizadas o utilizadas
             </p>
           </div>
 
@@ -1234,8 +1238,7 @@ export default async function ProcessPage({
                         </div>
                       ) : (
                         <div>
-                          {process.status ===
-                            "active" &&
+                          {canSchedule &&
                           isNextSession ? (
                             <Link
                               href={`/proceso/${token}/agendar`}
@@ -1287,6 +1290,11 @@ export default async function ProcessPage({
               },
             )}
           </div>
+
+          <p className="mt-7 text-center text-sm leading-6 text-brand-brown/60">
+            Para solicitar cambios o reprogramar una sesión, <Link href="/contacto" className="text-brand-wine underline">contacta a la coach</Link>.
+            Los cambios se gestionan sobre la misma sesión del proceso.
+          </p>
 
           {/* =============================================
               AVISO DE PRIVACIDAD DEL TOKEN

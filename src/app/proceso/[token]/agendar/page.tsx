@@ -10,6 +10,7 @@ import ProcessSessionScheduler from "@/components/publico/proceso/ProcessSession
 import {
   getProcessByToken,
 } from "@/lib/coaching/get-process-by-token";
+import { nextProcessSessionNumber } from "@/lib/coaching/process-entitlement";
 
 export const metadata = {
   title:
@@ -50,65 +51,20 @@ export default async function ScheduleProcessSessionPage({
     process,
     bookings,
     serviceSlug,
+    canSchedule,
   } = data;
 
   if (
-    process.status !==
-    "active"
+    !canSchedule
   ) {
     redirect(
       `/proceso/${token}`,
     );
   }
 
-  /*
-    Las reservas canceladas
-    no consumen una sesión.
-  */
-
-  const activeBookings =
-    bookings.filter(
-      (booking) =>
-        booking.status !==
-        "cancelled",
-    );
-
-  const usedNumbers =
-    new Set(
-      activeBookings
-        .map(
-          (booking) =>
-            booking.package_session_number,
-        )
-        .filter(
-          (
-            value,
-          ): value is number =>
-            value !== null,
-        ),
-    );
-
-  let nextSessionNumber:
-    | number
-    | null = null;
-
-  for (
-    let number = 1;
-    number <=
-    process.total_sessions;
-    number += 1
-  ) {
-    if (
-      !usedNumbers.has(
-        number,
-      )
-    ) {
-      nextSessionNumber =
-        number;
-
-      break;
-    }
-  }
+  // A change request is handled by the coach on the same booking. Cancelling
+  // does not grant an additional entitlement automatically.
+  const nextSessionNumber = nextProcessSessionNumber(process.total_sessions, bookings);
 
   if (
     nextSessionNumber ===

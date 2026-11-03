@@ -16,6 +16,7 @@ import {
 } from "@/lib/supabase/server";
 import { sendBookingChangeEmail } from "@/lib/email/send-booking-change-email";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { requestStripeBookingChange } from "@/lib/bookings/stripe-booking-changes";
 
 type RouteContext = {
   params: Promise<{
@@ -263,6 +264,7 @@ export async function GET(
       id,
       status,
       payment_flow
+      ,stripe_mode
     `)
     .eq(
       "id",
@@ -285,7 +287,7 @@ export async function GET(
     );
   }
 
-  if (booking.payment_flow === "stripe") {
+  if (booking.payment_flow === "stripe" && !booking.stripe_mode) {
     return NextResponse.json(
       { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
       { status: 409 },
@@ -477,10 +479,13 @@ export async function POST(
   }
 
   if (booking.payment_flow === "stripe") {
-    return NextResponse.json(
-      { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
-      { status: 409 },
-    );
+    try {
+      return NextResponse.json(await requestStripeBookingChange(booking.id, "rescheduled", requestedStartsAt.toISOString()),
+        { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return NextResponse.json({ error: "Esta reserva requiere revisión antes de guardar el cambio." },
+        { status: 409, headers: { "Cache-Control": "no-store" } });
+    }
   }
 
   if (

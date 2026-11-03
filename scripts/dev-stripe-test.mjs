@@ -7,11 +7,13 @@ import { basename, join, relative, resolve } from 'node:path';
 
 export const required = [
   'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'NEXT_PUBLIC_SITE_URL',
+  'STRIPE_MODE', 'STRIPE_EXPECTED_ACCOUNT_ID', 'STRIPE_PAYMENT_METHOD_CONFIGURATION_ID', 'PAID_BOOKINGS_ENABLED',
   'STRIPE_LOCAL_WORKER_SECRET', 'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY',
   'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI',
   'RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'COACH_EMAIL', 'CONTACT_TO_EMAIL', 'INTAKE_TOKEN_ENCRYPTION_KEY',
 ];
+const optional = ['STRIPE_TEST_SUPABASE_PROJECT_REF'];
 const excluded = new Set(['node_modules', '.git', '.next', '.aws', '.codex', '.agents']);
 export function copySource(root, target) {
   cpSync(root, target, { recursive: true, filter(source) {
@@ -32,6 +34,27 @@ export function assertNoRetiredE2EConfiguration(config) {
     throw new Error('Remove retired STRIPE_E2E_ variables; runtime fault injection has been removed.');
   }
 }
+export function assertIsolatedTestConfiguration(config) {
+  assertNoRetiredE2EConfiguration(config);
+  const site = new URL(config.NEXT_PUBLIC_SITE_URL);
+  const database = new URL(config.NEXT_PUBLIC_SUPABASE_URL);
+  const testRef = config.STRIPE_TEST_SUPABASE_PROJECT_REF;
+  const localDatabase = ['localhost', '127.0.0.1', '[::1]'].includes(database.hostname) &&
+    database.protocol === 'http:' && database.port !== '';
+  const stagingDatabase = /^[a-z]{20}$/.test(testRef ?? '') && testRef !== 'rysgpojjhiljrrwtjguy' &&
+    database.origin === `https://${testRef}.supabase.co`;
+  if (site.href !== 'http://localhost:3000/' || database.href !== database.origin + '/' ||
+      (!localDatabase && !stagingDatabase) || database.username || database.password ||
+      config.STRIPE_MODE !== 'test' || !/^acct_[A-Za-z0-9]+$/.test(config.STRIPE_EXPECTED_ACCOUNT_ID ?? '') ||
+      !/^pmc_[A-Za-z0-9]+$/.test(config.STRIPE_PAYMENT_METHOD_CONFIGURATION_ID ?? '') ||
+      !['true', 'false'].includes(config.PAID_BOOKINGS_ENABLED) ||
+      !config.STRIPE_SECRET_KEY.startsWith('sk_test_') ||
+      !config.STRIPE_WEBHOOK_SECRET.startsWith('whsec_') ||
+      config.STRIPE_LOCAL_WORKER_SECRET.length < 32 ||
+      Buffer.from(config.INTAKE_TOKEN_ENCRYPTION_KEY, 'base64').length !== 32) {
+    throw new Error('Invalid isolated test configuration (values withheld)');
+  }
+}
 async function main() {
   const root = resolve(import.meta.dirname, '..');
   let config;
@@ -39,17 +62,7 @@ async function main() {
   catch { console.error('Missing or unreadable .env.stripe-test. Required names:', required.join(', ')); process.exitCode = 1; return; }
   const missing = required.filter(name => !config[name]?.trim());
   if (missing.length) { console.error('Missing names:', missing.join(', ')); process.exitCode = 1; return; }
-  assertNoRetiredE2EConfiguration(config);
-  const site = new URL(config.NEXT_PUBLIC_SITE_URL);
-  const database = new URL(config.NEXT_PUBLIC_SUPABASE_URL);
-  if (site.origin !== 'http://localhost:3000' || site.href !== site.origin + '/' ||
-      database.href !== 'https://rysgpojjhiljrrwtjguy.supabase.co/' ||
-      !config.STRIPE_SECRET_KEY.startsWith('sk_test_') ||
-      !config.STRIPE_WEBHOOK_SECRET.startsWith('whsec_') ||
-      config.STRIPE_LOCAL_WORKER_SECRET.length < 32 ||
-      Buffer.from(config.INTAKE_TOKEN_ENCRYPTION_KEY, 'base64').length !== 32) {
-    throw new Error('Invalid test configuration (values withheld)');
-  }
+  assertIsolatedTestConfiguration(config);
   const target = mkdtempSync(join(tmpdir(), 'coaching-stripe-dev-'));
   try {
     copySource(root, target);
@@ -60,7 +73,7 @@ async function main() {
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
       NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1' };
     // No inherited app credentials, NODE_OPTIONS, or arbitrary file overrides.
-    for (const name of required) env[name] = config[name];
+    for (const name of [...required, ...optional]) if (config[name] !== undefined) env[name] = config[name];
     const child = spawn(process.execPath, [join(target, 'node_modules/next/dist/bin/next'),
       'dev', '--webpack', '--hostname', 'localhost', '--port', '3000'], { cwd: target, env, stdio: 'inherit' });
     const stop = () => child.kill('SIGTERM');

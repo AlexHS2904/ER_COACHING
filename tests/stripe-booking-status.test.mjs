@@ -5,7 +5,7 @@ import { testModules } from './helpers/load-typescript.mjs';
 const legalAcceptance = testModules().load('src/lib/legal/acceptance.ts').currentBookingAcceptance;
 
 const id='11111111-1111-4111-8111-111111111111',site='http://localhost:3000',token='a'.repeat(64);
-const env={INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,11).toString('base64')};
+const env={NEXT_PUBLIC_SITE_URL:site,INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,11).toString('base64')};
 function destinationFixture(changes={},formChanges={},access=token) {
   let reads=0;
   const db={from(){return {select(){return this;},eq(){return this;},async maybeSingle(){reads++;return {data:form,error:null};}};}};
@@ -213,6 +213,7 @@ function changeRouteFixture(kind,{dbFailure=false,emailWarning=null,stripe=false
     '@/lib/supabase/admin':{getSupabaseAdmin:()=>db},'@/lib/supabase/server':{createClient:async()=>auth},
     '@/lib/google/calendar':{updateGoogleCalendarEvent:async()=>calls.push('calendar'),deleteGoogleCalendarEvent:async()=>calls.push('calendar')},
     '@/lib/email/send-booking-change-email':{sendBookingChangeEmail:async(bookingId,notice)=>{assert.equal(bookingId,id);calls.push(`email:${notice}`);return emailWarning;}},
+    '@/lib/bookings/stripe-booking-changes':{requestStripeBookingChange:async()=>{assert.equal(stripe,true);throw new Error('booking_change_not_available');}},
   });
   const route=modules.load(`src/app/api/bookings/[id]/${kind}/route.ts`);
   return {calls,run:()=>route.POST({json:async()=>({startsAt:'2035-01-02T12:00:00Z'})},{params:Promise.resolve({id})})};

@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { testModules } from './helpers/load-typescript.mjs';
@@ -16,7 +17,7 @@ function fixture({ durable = false, priorVersion = false } = {}) {
   const calls = [];
   const hash = testModules().load('src/lib/stripe/access.ts').hashBookingAccess(cookie);
   const acceptedAt = '2026-10-29T22:00:00Z';
-  const booking = { id: bookingId, booking_reference: 'FIXTURE', created_at: acceptedAt,
+  const booking = { ...stripeFixtureScope, id: bookingId, booking_reference: 'FIXTURE', created_at: acceptedAt,
     booking_access_token_hash: hash, status: 'pending', payment_status: 'pending', payment_flow: 'stripe',
     finalization_status: 'not_started', payment_expires_at: '2099-01-01T12:30:00Z', expired_at: null,
     price_snapshot: '500.00', currency_snapshot: 'MXN',
@@ -45,8 +46,7 @@ function fixture({ durable = false, priorVersion = false } = {}) {
   const modules = testModules({
     'next/server': { NextResponse: response },
     '@/lib/supabase/admin': { getSupabaseAdmin: () => db },
-    '@/lib/stripe/server': { getStripeTestSiteUrl: () => site, getStripeTestClient: () => ({}),
-      getStripeBookingAdmin: () => db },
+    '@/lib/stripe/server': stripeRuntimeFixture(db),
     '@/lib/security/public-abuse': { enforcePublicAbuse: async () => null },
     '@/lib/bookings/finalize-paid-booking': { finalizePaidBooking: async () => { throw new Error('Unpaid legal flow must not finalize'); } },
     '@/lib/stripe/expire-hold': { expireDueStripeHolds: async () => { calls.push('expire'); } },
@@ -96,16 +96,16 @@ test('accepted request creates the hold with unchanged business fields and then 
     .POST(f.req({ ...input, legalAcceptance: accepted }));
   assert.equal(result.status, 200);
   assert.equal(result.data.bookingId, bookingId);
-  assert.equal(f.calls[0], 'expire');
-  assert.equal(f.calls[1].name, 'create_stripe_booking_hold_with_legal_v1');
-  assert.equal(f.calls[1].args.p_starts_at, input.startsAt);
-  assert.equal(f.calls[1].args.p_service_slug, input.service);
-  assert.equal(f.calls[1].args.p_customer_email, input.email);
-  assert.equal(f.calls[2].checkout, bookingId);
-  assert.deepEqual(f.calls[1].args.p_legal_acceptance, accepted);
+  assert.equal(f.calls.includes('expire'), false, 'Checkout must leave expiration batches to the worker');
+  assert.equal(f.calls[0].name, 'create_stripe_booking_hold_with_legal_v2');
+  assert.equal(f.calls[0].args.p_starts_at, input.startsAt);
+  assert.equal(f.calls[0].args.p_service_slug, input.service);
+  assert.equal(f.calls[0].args.p_customer_email, input.email);
+  assert.equal(f.calls[1].checkout, bookingId);
+  assert.deepEqual(f.calls[0].args.p_legal_acceptance, accepted);
   // Acceptance is passed to the atomic RPC, never browser timestamps or Stripe metadata.
-  assert.equal(f.calls[1].args.terms_accepted_at, undefined);
-  assert.equal(f.calls[1].args.payment_expires_at, undefined);
+  assert.equal(f.calls[0].args.terms_accepted_at, undefined);
+  assert.equal(f.calls[0].args.payment_expires_at, undefined);
 });
 
 test('recovery uses the existing booking/cookie without creating another hold or extending it', async () => {

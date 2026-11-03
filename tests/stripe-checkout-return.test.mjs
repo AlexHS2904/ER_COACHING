@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { testModules } from './helpers/load-typescript.mjs';
@@ -10,17 +11,17 @@ const access=testModules().load('src/lib/stripe/access.ts');
 
 function fixture(options={}) {
   const now=Date.now(),legalAt=new Date(now-90_000).toISOString();
-  const booking={id,booking_reference:'FIXTURE',created_at:new Date(now-120_000).toISOString(),
+  const booking={...stripeFixtureScope,id,booking_reference:'FIXTURE',created_at:new Date(now-120_000).toISOString(),
     status:'pending',payment_status:'pending',payment_flow:'stripe',finalization_status:'not_started',
     next_finalization_at:new Date(now-1000).toISOString(),
     expired_at:null,payment_expires_at:new Date(now+28*60_000).toISOString(),
     booking_access_token_hash:access.hashBookingAccess(token),price_snapshot:'500.00',currency_snapshot:'MXN',
     legal_terms_accepted_at:legalAt,legal_adult_confirmed_at:legalAt,
     legal_terms_version:'2026-10-29.2',legal_privacy_notice_version:'2026-10-29.2',...options.booking};
-  const attempt={id:attemptId,booking_id:id,created_at:booking.created_at,amount_minor:50000,currency:'mxn',
+  const attempt={...stripeFixtureScope,id:attemptId,booking_id:id,created_at:booking.created_at,amount_minor:50000,currency:'mxn',
     stripe_checkout_session_id:sessionId,stripe_payment_intent_id:null,...options.attempt};
-  const session={id:sessionId,object:'checkout.session',livemode:false,mode:'payment',client_reference_id:id,
-    metadata:{booking_id:id,payment_attempt_id:attemptId,booking_reference:'FIXTURE'},
+  const session={id:sessionId,object:'checkout.session',livemode:false,payment_method_types:["card"],mode:'payment',client_reference_id:id,
+    metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,payment_attempt_id:attemptId,booking_reference:'FIXTURE'},
     amount_total:50000,currency:'mxn',status:'complete',payment_status:'paid',payment_intent:'pi_fixture',
     ...options.session};
   const event={id:eventId,object:'event',livemode:false,type:'checkout.session.completed',
@@ -48,7 +49,7 @@ function fixture(options={}) {
     },
     async rpc(name,args) {
       calls.rpc.push({name,args});
-      assert.equal(name,'apply_stripe_checkout_event_v1');
+      assert.equal(name,'apply_stripe_checkout_event_v2');
       assert.equal(args.p_event_id,eventId);
       if(options.persistError)return {data:null,error:{message:'private ledger failure'}};
       if(ledger.has(args.p_event_id))return {data:{booking_id:id,duplicate:true},error:null};
@@ -64,6 +65,7 @@ function fixture(options={}) {
     },
   };
   const stripe={
+    paymentIntents:{async retrieve(){return {id:session.payment_intent,status:"succeeded",livemode:false,amount:50000,amount_received:50000,currency:"mxn",metadata:session.metadata,latest_charge:{payment_method_details:{type:"card"}}};}},
     checkout:{sessions:{
       async retrieve(sid){calls.retrieve.push(sid);if(options.retrieveError)throw new Error('private Stripe response');return structuredClone(session);},
       async create(){throw new Error('A return must never create another Checkout');},
@@ -72,7 +74,10 @@ function fixture(options={}) {
       return options.pages?options.pages[calls.list.length-1]:{data:options.noEvent?[]:[event],has_more:false};}},
   };
   const modules=testModules({
-    '@/lib/stripe/server':{getStripeBookingAdmin:()=>db,getStripeTestClient:()=>stripe},
+    '@/lib/stripe/server':{...stripeRuntimeFixture(db,stripe),...(options.configurationUnavailable?{
+      getStripeConfig(){throw new Error('Sales configuration unavailable');},
+      getVerifiedStripeContext(){throw new Error('Must not query Stripe for completed historical booking');},
+    }:{} )},
     '@/lib/bookings/finalize-paid-booking':{async finalizePaidBooking(bookingId){
       calls.finalize.push(bookingId);
       if(options.finalizerError)throw new Error('private finalization failure');
@@ -170,8 +175,8 @@ for(const sid of ['cs_test_other','cs_live_fixture','invalid',''])test(`foreign 
 for(const change of [
   {livemode:true},{mode:'subscription'},{object:'payment_intent'},{client_reference_id:other},
   {metadata:{booking_id:other,payment_attempt_id:attemptId,booking_reference:'FIXTURE'}},
-  {metadata:{booking_id:id,payment_attempt_id:other,booking_reference:'FIXTURE'}},
-  {metadata:{booking_id:id,payment_attempt_id:attemptId,booking_reference:'WRONG'}},
+  {metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,payment_attempt_id:other,booking_reference:'FIXTURE'}},
+  {metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:id,payment_attempt_id:attemptId,booking_reference:'WRONG'}},
   {amount_total:1},{currency:'usd'},{payment_intent:'invalid'},
 ])test(`verified Stripe Session rejects conflicting identity (${Object.keys(change)[0]} ${JSON.stringify(change).length})`,async()=>{
   const f=fixture({session:change});await assert.rejects(()=>f.run(),e=>e.code==='invalid_access');assert.equal(f.calls.rpc.length,0);assert.equal(f.calls.effects,0);
@@ -232,4 +237,12 @@ test('submitted intake remains submitted and never produces an editable redirect
 test('a return without any Session never creates one or writes the booking',async()=>{
   const f=fixture({noAttempt:true}),r=await f.run(undefined);assert.equal(r.observation,'unpaid');assert.equal(f.calls.retrieve.length,0);
   assert.equal(f.calls.rpc.length,0);assert.equal(f.calls.effects,0);
+});
+
+test('completed historical paid access survives absent sales configuration without adopting Live provenance',async()=>{
+  const f=fixture({configurationUnavailable:true,booking:{status:'confirmed',payment_status:'paid',finalization_status:'completed',
+    stripe_mode:null,stripe_account_id:null,stripe_site_origin:null}});
+  const r=await f.run();assert.equal(r.observation,'paid');assert.equal(r.intake.status,'available');
+  assert.equal(f.calls.retrieve.length,0);assert.equal(f.calls.rpc.length,0);assert.equal(f.calls.finalize.length,0);
+  assert.equal(f.booking.stripe_mode,null);assert.equal(f.booking.stripe_account_id,null);
 });

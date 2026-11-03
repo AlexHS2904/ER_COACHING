@@ -7,19 +7,21 @@ import { localSupabaseQuery } from './helpers/local-supabase-query.mjs';
 import { testModules } from './helpers/load-typescript.mjs';
 import * as ReactEmail from 'react-email';
 import { render } from '@react-email/render';
+import { liveFixture, liveMigrations } from './helpers/stripe-live-postgres.mjs';
+import { stripeRuntimeFixture, stripeFixtureConfig } from './helpers/stripe-runtime-fixture.mjs';
 
 const pg=localPostgres();
 const migration=new URL('../supabase/migrations/20261029012540_decouple_intake_email_from_finalization.sql',import.meta.url);
 const env={INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,11).toString('base64'),RESEND_FROM_EMAIL:'sender@example.test',COACH_EMAIL:'coach@example.test'};
 const site='http://localhost:3000';
 const rows=q=>JSON.parse(pg.sql(q)||'null');
+const literal=value=>`'${String(value).replaceAll("'","''")}'`;
+const json=value=>`${literal(JSON.stringify(value))}::jsonb`;
+const mode='test',account='acct_fixture';
+const acceptance=testModules().load('src/lib/legal/acceptance.ts').currentBookingAcceptance;
+const scopeSql=`'${mode}','${account}'`;
 let day=0;
-before(()=>pg.start(new URL('./fixtures/stripe-local-schema.sql',import.meta.url),[
-  new URL('../supabase/migrations/20261027000100_activate_booking_intake_v2.sql',import.meta.url),
-  new URL('../supabase/migrations/20261028000100_stripe_test_booking_lifecycle.sql',import.meta.url),
-  new URL('../supabase/migrations/20261028000200_intake_v2_stable_service_identity.sql',import.meta.url),
-  new URL('../supabase/migrations/20261028201527_stripe_failed_attempt_recovery.sql',import.meta.url), migration,
-]));
+before(()=>pg.start(liveFixture,liveMigrations));
 after(()=>pg.stop());
 // Release occupancy between independent session-window scenarios in this
 // isolated fixture; all assertions run before cleanup. Never a remote DB.
@@ -32,10 +34,10 @@ function fixture({mailFailure=false,ambiguousEmail=null,reminderError=null,onRem
       ambiguous=false;return {data:null,error:{message:'simulated lost receipt persistence'}};
     }
     const r=await adapter.rpc(name,args);
-    return name==='activate_booking_intake_v2'?{...r,data:r.data?[r.data]:null}:r;}};
+    return ['activate_booking_intake_v2','activate_stripe_intake_v1'].includes(name)?{...r,data:r.data?[r.data]:null}:r;}};
   const components=Object.fromEntries(['Body','Button','Container','Head','Heading','Hr','Html','Preview','Section','Text'].map(n=>[n,n]));
   const modules=testModules({
-    '@/lib/stripe/server':{getStripeBookingAdmin:()=>db,getStripeTestSiteUrl:()=>site},
+    '@/lib/stripe/server':stripeRuntimeFixture(db),
     '@/lib/supabase/admin':{getSupabaseAdmin:()=>db},
     '@/lib/google/calendar':{ensurePaidBookingCalendar:async()=>({eventId:'event-fixture',meetUrl:'https://meet.google.com/test-only',calendarUrl:'https://calendar.google.com/private-fixture'})},
     '@/lib/email/resend':{getResend:()=>({emails:{send:async(payload,options)=>{
@@ -68,13 +70,29 @@ function fixture({mailFailure=false,ambiguousEmail=null,reminderError=null,onRem
   return {...modules.load('src/lib/bookings/finalize-paid-booking.ts'),
     ...modules.load('src/lib/intake/process-stripe-reminders.ts'),modules,db,emails,steps,wireRequests,accepted,providerPhases,stats:adapter.stats};
 }
-function paidBooking() {
-  const id=randomUUID();day++;
-  pg.sql(`INSERT INTO public.bookings(id,service_id,service_name_snapshot,duration_minutes_snapshot,session_count_snapshot,price_snapshot,currency_snapshot,
-    customer_name,customer_email,starts_at,ends_at,payment_flow,payment_status,payment_provider,payment_reference,paid_at,finalization_status,next_finalization_at,payment_expires_at,booking_access_token_hash)
-    SELECT '${id}',s.id,s.name,90,1,500,'MXN','Fixture','customer@example.test','2036-01-01'::timestamptz+interval '${day*2} days',
-      '2036-01-01'::timestamptz+interval '${day*2} days 90 minutes','stripe','paid','stripe','pi_fixture',now(),'pending',now(),now()+interval '30 minutes','${randomBytes(32).toString('hex')}' FROM public.services s WHERE slug='sesion-1-1';`);
-  return id;
+function pendingBooking(service='sesion-1-1') {
+  day++;
+  const access=randomBytes(32).toString('hex');
+  const durable=testModules({},env).load('src/lib/coaching/process-access.ts').createDurableProcessAccess();
+  const hold=rows(`SELECT public.create_stripe_booking_hold_with_legal_v2('${service}',
+    current_date+interval '${day+1} days 12 hours','Fixture','customer@example.test',NULL,NULL,
+    '${access}',${json(acceptance)},${scopeSql},'${site}','${durable.tokenHash}','${durable.tokenEncrypted}')`);
+  return {...hold,access,processToken:durable.token};
+}
+function paidBooking(service='sesion-1-1') {
+  const h=pendingBooking(service),owner=randomUUID();
+  const claim=rows(`SELECT public.claim_stripe_checkout_v2('${h.booking_id}','${h.access}','${owner}','${site}',${scopeSql},'pmc_fixture')`);
+  const attempt=claim.attempt,sessionId=`cs_test_${randomUUID().replaceAll('-','')}`,intentId=`pi_${attempt.id.replaceAll('-','')}`;
+  pg.sql(`SELECT public.begin_stripe_checkout_creation_v2('${h.booking_id}','${attempt.id}','${owner}',${scopeSql});
+    SELECT public.save_stripe_checkout_v2('${h.booking_id}','${attempt.id}','${owner}','${sessionId}',to_timestamp(${attempt.checkout_payload.expires_at}),${scopeSql})`);
+  const receipt={id:sessionId,livemode:false,mode:'payment',status:'complete',payment_status:'paid',
+    amount_total:Number(attempt.amount_minor),currency:attempt.currency,payment_intent:intentId,
+    client_reference_id:h.booking_id,metadata:attempt.checkout_payload.metadata,payment_method_types:['card','link'],
+    verified_payment_intent:{id:intentId,status:'succeeded',amount:Number(attempt.amount_minor),
+      amount_received:Number(attempt.amount_minor),currency:attempt.currency,livemode:false,metadata:attempt.checkout_payload.metadata}};
+  const payment=rows(`SELECT public.apply_stripe_checkout_event_v2('evt_${randomUUID()}','checkout.session.completed',${json(receipt)},${scopeSql})`);
+  assert.equal(payment.accepted,true,'fixture uses the real verified payment ledger, never a paid flag alone');
+  return h.booking_id;
 }
 const booking=id=>rows(`SELECT to_jsonb(b) FROM public.bookings b WHERE id='${id}'`);
 const intake=id=>rows(`SELECT to_jsonb(f) FROM public.booking_intake_forms f WHERE booking_id='${id}'`);
@@ -86,7 +104,7 @@ test('real finalizer: Calendar → stable intake → ticket emails → completed
   const f=await complete(),b=booking(f.id),form=intake(f.id);
   assert.equal(b.finalization_status,'completed');assert.equal(b.payment_status,'paid');assert.equal(b.status,'confirmed');
   assert.equal(form.status,'active');assert.equal(form.ready_email_sent_at,null);assert.equal(b.stripe_intake_email_started_at,null);
-  assert.equal(f.emails.length,2);assert.ok(f.steps.indexOf('activate_booking_intake_v2')<f.steps.indexOf('customer_email_start'));
+  assert.equal(f.emails.length,2);assert.ok(f.steps.indexOf('activate_stripe_intake_v1')<f.steps.indexOf('customer_email_start'));
   const customer=f.emails.find(x=>x.payload.to==='customer@example.test'),serialized=JSON.stringify(customer.payload.react);
   const token=f.modules.load('src/lib/intake/intake-token-crypto.ts').decryptIntakeToken(form.access_token_encrypted);
   assert.ok(serialized.includes('Completar formulario'));assert.ok(serialized.includes(`/formulario/${token}`));
@@ -132,7 +150,7 @@ for(const [label,change] of [
 
 test('concurrent workers atomically claim one reminder, never two emails',async()=>{
   const f=await complete();sessionIn(f.id,30);const form=intake(f.id);
-  const query='SELECT public.claim_stripe_intake_reminder_v1();';
+  const query=`SELECT public.claim_stripe_intake_reminder_v2(${scopeSql});`;
   const results=await Promise.all([pg.run(`BEGIN;${query}SELECT pg_sleep(0.15);COMMIT;`),pg.run(query)]);
   assert.ok(results.every(r=>r.code===0));assert.equal(results.filter(r=>r.output.includes(form.id)).length,1);
   assert.equal(rows(query),null);assert.equal(intake(f.id).ready_email_error,'reminder_claimed_not_started');
@@ -150,7 +168,7 @@ test('lost email response retains one-shot evidence and never redispatches after
 
 test('submission between claim and send is rechecked and suppresses the reminder',async()=>{
   const f=await complete();sessionIn(f.id,30);const original=f.db.rpc;
-  f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v1'&&r.data)stopReminders(f.id);return r;};
+  f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v2'&&r.data)stopReminders(f.id);return r;};
   const before=f.emails.length;await f.processStripeIntakeReminders();assert.equal(f.emails.length,before);
   assert.equal(intake(f.id).ready_email_error,null);assert.equal(booking(f.id).stripe_intake_email_started_at,null);
 });
@@ -164,8 +182,8 @@ for(const [label,change] of [
   if(change)pg.sql(`UPDATE public.booking_intake_forms SET ${change} WHERE booking_id='${f.id}'`);
   else pg.sql(`DELETE FROM public.booking_intake_forms WHERE booking_id='${f.id}'`);
   pg.sql(`UPDATE public.bookings SET finalization_status='pending' WHERE id='${f.id}'`);
-  const owner=randomUUID();pg.sql(`SELECT public.claim_stripe_finalization_v1('${f.id}','${owner}')`);
-  assert.throws(()=>pg.sql(`SELECT public.save_stripe_finalization_v1('${f.id}','${owner}','completed')`),/incomplete_finalization/);
+  const owner=randomUUID();pg.sql(`SELECT public.claim_stripe_finalization_v2('${f.id}','${owner}',${scopeSql})`);
+  assert.throws(()=>pg.sql(`SELECT public.save_stripe_finalization_v2('${f.id}','${owner}','completed','{}'::jsonb,${scopeSql})`),/incomplete_finalization/);
   pg.sql(`UPDATE public.bookings SET finalization_status='review_required' WHERE id='${f.id}'`);
 });
 
@@ -178,27 +196,33 @@ test('submitted intake can complete finalization without requiring accessible to
 test('booking without intake requirement retains Calendar/email completion contract',async()=>{
   const f=await complete();
   pg.sql(`DELETE FROM public.booking_intake_forms WHERE booking_id='${f.id}';UPDATE public.bookings SET finalization_status='pending',service_id=(SELECT id FROM public.services WHERE slug='proceso') WHERE id='${f.id}'`);
-  const owner=randomUUID();pg.sql(`SELECT public.claim_stripe_finalization_v1('${f.id}','${owner}')`);
-  assert.equal(rows(`SELECT public.save_stripe_finalization_v1('${f.id}','${owner}','completed')`).finalization_status,'completed');
+  const owner=randomUUID();pg.sql(`SELECT public.claim_stripe_finalization_v2('${f.id}','${owner}',${scopeSql})`);
+  assert.equal(rows(`SELECT public.save_stripe_finalization_v2('${f.id}','${owner}','completed','{}'::jsonb,${scopeSql})`).finalization_status,'completed');
 });
 
 test('new Checkout cancel URL uses the same reference and successors keep the stored payload',()=>{
-  const f=fixture(),access=f.modules.load('src/lib/stripe/access.ts'),token=access.createBookingAccess(),owner=randomUUID();day++;
-  const h=rows(`SELECT public.create_stripe_booking_hold_v1('sesion-1-1','2036-01-01'::timestamptz+interval '${day*2} days','Fixture','customer@example.test',NULL,NULL,'${access.hashBookingAccess(token)}')`);
-  const claim=()=>rows(`SELECT public.claim_stripe_checkout_v1('${h.booking_id}','${access.hashBookingAccess(token)}','${owner}','${site}')`);
+  const owner=randomUUID(),h=pendingBooking();
+  const claim=()=>rows(`SELECT public.claim_stripe_checkout_v2('${h.booking_id}','${h.access}','${owner}','${site}',${scopeSql},'pmc_fixture')`);
   const first=claim();assert.equal(first.attempt.checkout_payload.cancel_url,`${site}/reservar/confirmada?ref=${first.booking.booking_reference}`);
-  pg.sql(`SELECT public.begin_stripe_checkout_creation_v1('${h.booking_id}','${first.attempt.id}','${owner}');SELECT public.record_stripe_checkout_failure_v1('${h.booking_id}','${first.attempt.id}','${owner}','failed','stripe_invalid_request')`);
+  pg.sql(`SELECT public.begin_stripe_checkout_creation_v2('${h.booking_id}','${first.attempt.id}','${owner}',${scopeSql});SELECT public.record_stripe_checkout_failure_v2('${h.booking_id}','${first.attempt.id}','${owner}','failed','stripe_invalid_request',${scopeSql})`);
   const successor=claim();assert.notEqual(successor.attempt.id,first.attempt.id);
   assert.equal(successor.booking.payment_expires_at,first.booking.payment_expires_at);
   assert.equal(successor.attempt.checkout_payload.cancel_url,first.attempt.checkout_payload.cancel_url);
 });
 
 test('migration preserves rows and existing RPC signature/permissions when reapplied locally',()=>{
-  const snapshot=()=>rows("SELECT jsonb_build_object('bookings',(SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM public.bookings b),'forms',(SELECT jsonb_agg(to_jsonb(f) ORDER BY id) FROM public.booking_intake_forms f))");
+  const snapshot=()=>rows("SELECT jsonb_build_object('bookings',(SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM public.bookings b),'forms',(SELECT jsonb_agg(to_jsonb(f) ORDER BY id) FROM public.booking_intake_forms f),'attempts',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM public.booking_payment_attempts a),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY stripe_event_id) FROM public.stripe_events e),'processes',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM public.coaching_processes p))");
+  const scopedDefinitions=()=>rows("SELECT jsonb_object_agg(p.oid::regprocedure::text,pg_get_functiondef(p.oid)) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('save_stripe_finalization_v2','claim_stripe_finalization_v2','claim_stripe_checkout_v2','claim_stripe_intake_reminder_v2','mark_stripe_intake_reminder_dispatch_started_v2','release_unstarted_stripe_intake_reminder_v2')");
   const before=snapshot();const oid=pg.sql("SELECT 'public.save_stripe_finalization_v1(uuid,uuid,text,jsonb)'::regprocedure::oid");
+  const bodies=scopedDefinitions();
   pg.sql(readFileSync(migration,'utf8'));assert.deepEqual(snapshot(),before);
+  assert.deepEqual(scopedDefinitions(),bodies);
   assert.equal(pg.sql("SELECT 'public.save_stripe_finalization_v1(uuid,uuid,text,jsonb)'::regprocedure::oid"),oid);
-  for(const fn of ['save_stripe_finalization_v1(uuid,uuid,text,jsonb)','claim_stripe_intake_reminder_v1()','release_unstarted_stripe_intake_reminder_v1(uuid,timestamp with time zone)','mark_stripe_intake_reminder_dispatch_started_v1(uuid,uuid,timestamp with time zone,timestamp with time zone)','claim_stripe_checkout_v1(uuid,text,uuid,text)']) {
+  for(const fn of ['save_stripe_finalization_v1(uuid,uuid,text,jsonb)','claim_stripe_intake_reminder_v1()','release_unstarted_stripe_intake_reminder_v1(uuid,timestamp with time zone)','mark_stripe_intake_reminder_dispatch_started_v1(uuid,uuid,timestamp with time zone,timestamp with time zone)','claim_stripe_checkout_v1(uuid,text,uuid,text)',
+    'save_stripe_finalization_v2(uuid,uuid,text,jsonb,text,text)','claim_stripe_finalization_v2(uuid,uuid,text,text)',
+    'claim_stripe_checkout_v2(uuid,text,uuid,text,text,text,text)','claim_stripe_intake_reminder_v2(text,text)',
+    'mark_stripe_intake_reminder_dispatch_started_v2(uuid,uuid,timestamp with time zone,timestamp with time zone,text,text)',
+    'release_unstarted_stripe_intake_reminder_v2(uuid,timestamp with time zone,text,text)']) {
     assert.equal(pg.sql(`SELECT prosecdef AND proconfig @> ARRAY['search_path=pg_catalog, pg_temp'] FROM pg_proc WHERE oid='public.${fn}'::regprocedure`),'t');
     for(const role of ['anon','authenticated'])assert.equal(pg.sql(`SELECT has_function_privilege('${role}','public.${fn}','EXECUTE')`),'f');
     assert.equal(pg.sql(`SELECT has_function_privilege('service_role','public.${fn}','EXECUTE')`),'t');
@@ -244,7 +268,7 @@ for(const loss of ['response','persistence'])for(const nextStatus of ['active','
     const before=intake(id),b=booking(id);assert.equal(b.customer_email_id,null);
     assert.equal(f.accepted.size,1);assert.equal(b.finalization_status,'retryable');
     const activate=f.modules.load('src/lib/intake/activate-booking-intake.ts').activateBookingIntake;
-    const params={bookingId:id,provider:'stripe',paymentReference:b.payment_reference,siteUrl:site,sendReadyEmail:false};
+    const params={bookingId:id,provider:'stripe',paymentReference:b.payment_reference,siteUrl:site,sendReadyEmail:false,stripeScope:stripeFixtureConfig};
     const active=await activate(params);assert.ok(active.canonicalIntakeUrl);assert.ok(active.redirectIntakeUrl===active.canonicalIntakeUrl);
     if(nextStatus==='submitted')stopReminders(id);
     const next=await activate(params);
@@ -301,7 +325,7 @@ test('an ineligible booking does not block another session inside the reminder w
 for(const change of ["status='cancelled'","starts_at=now()-interval '1 second',ends_at=now()+interval '89 minutes'","starts_at=now()+interval '2 days',ends_at=now()+interval '2 days 90 minutes'"]) {
   test(`booking eligibility is rechecked between claim and dispatch: ${change.split('=')[0]}`,async()=>{
     const f=await complete();sessionIn(f.id,30);const original=f.db.rpc;
-    f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v1'&&r.data)pg.sql(`UPDATE public.bookings SET ${change} WHERE id='${f.id}'`);return r;};
+    f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v2'&&r.data)pg.sql(`UPDATE public.bookings SET ${change} WHERE id='${f.id}'`);return r;};
     const n=f.emails.length;await f.processStripeIntakeReminders();assert.equal(f.emails.length,n);
     if(change.includes('2 days')) {
       assert.equal(intake(f.id).ready_email_error,null);assert.equal(booking(f.id).stripe_intake_email_started_at,null);
@@ -311,7 +335,7 @@ for(const change of ["status='cancelled'","starts_at=now()-interval '1 second',e
 
 test('known unstarted reminder deferred by a concurrent reschedule is eligible again at the new session window',async()=>{
   const f=await complete();sessionIn(f.id,30);const original=f.db.rpc;let moved=false;
-  f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v1'&&r.data&&!moved){moved=true;sessionIn(f.id,1440);}return r;};
+  f.db.rpc=async(name,args)=>{const r=await original(name,args);if(name==='claim_stripe_intake_reminder_v2'&&r.data&&!moved){moved=true;sessionIn(f.id,1440);}return r;};
   const n=f.emails.length;assert.equal((await f.processStripeIntakeReminders()).sent,0);assert.equal(f.emails.length,n);
   assert.equal(booking(f.id).stripe_intake_email_started_at,null);assert.equal(intake(f.id).ready_email_error,null);
   f.db.rpc=original;sessionIn(f.id,30);
@@ -321,15 +345,15 @@ test('known unstarted reminder deferred by a concurrent reschedule is eligible a
 
 test('stale release cannot clear a newer reminder claim, and ambiguous sends never invoke release',async()=>{
   const f=await complete();sessionIn(f.id,30);
-  const first=rows('SELECT public.claim_stripe_intake_reminder_v1()');sessionIn(f.id,1440);
-  const release=stamp=>rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v1('${f.id}','${stamp}'))`);
+  const first=rows(`SELECT public.claim_stripe_intake_reminder_v2(${scopeSql})`);sessionIn(f.id,1440);
+  const release=stamp=>rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v2('${f.id}','${stamp}',${scopeSql}))`);
   assert.equal(release(first.claim_started_at),true);sessionIn(f.id,30);
-  const second=rows('SELECT public.claim_stripe_intake_reminder_v1()');assert.notEqual(second.claim_started_at,first.claim_started_at);
+  const second=rows(`SELECT public.claim_stripe_intake_reminder_v2(${scopeSql})`);assert.notEqual(second.claim_started_at,first.claim_started_at);
   sessionIn(f.id,1440);assert.equal(release(first.claim_started_at),false);
   assert.equal(release(second.claim_started_at),true);sessionIn(f.id,30);
   const failing=fixture({mailFailure:true});await failing.processStripeIntakeReminders();
   assert.equal(failing.emails.length,1);
-  assert.equal(failing.stats.rpcs.some(r=>r.fn==='release_unstarted_stripe_intake_reminder_v1'),false);
+  assert.equal(failing.stats.rpcs.some(r=>r.fn==='release_unstarted_stripe_intake_reminder_v2'),false);
   sessionIn(f.id,1440);
   const marker=booking(f.id).stripe_intake_email_started_at;
   assert.equal(release(marker),false);assert.equal(intake(f.id).ready_email_error,'reminder_delivery_requires_review');
@@ -353,7 +377,7 @@ for(const loss of ['returned error','thrown response','non-boolean response'])te
   const f=await complete();sessionIn(f.id,30);const original=f.db.rpc;
   f.db.rpc=async(name,args)=>{
     const r=await original(name,args);
-    if(name==='mark_stripe_intake_reminder_dispatch_started_v1'&&r.data===true) {
+    if(name==='mark_stripe_intake_reminder_dispatch_started_v2'&&r.data===true) {
       if(loss==='thrown response')throw new Error('response lost after commit');
       return loss==='returned error'?{data:null,error:{message:'response lost'}}:{data:'true',error:null};
     }
@@ -364,7 +388,7 @@ for(const loss of ['returned error','thrown response','non-boolean response'])te
   const b=booking(f.id),form=intake(f.id);
   assert.equal(f.emails.length,n);assert.equal(form.ready_email_error,'reminder_delivery_pending_or_unknown');
   assert.ok(b.stripe_intake_email_started_at);
-  assert.equal(f.stats.rpcs.some(x=>x.fn==='release_unstarted_stripe_intake_reminder_v1'),false);
+  assert.equal(f.stats.rpcs.some(x=>x.fn==='release_unstarted_stripe_intake_reminder_v2'),false);
   f.db.rpc=original;assert.equal((await f.processStripeIntakeReminders()).sent,0);
   assert.deepEqual(booking(f.id),b);assert.deepEqual(intake(f.id),form);
 });
@@ -390,8 +414,8 @@ test('accepted reminder with lost receipt persistence remains unknown and cannot
   assert.equal(form.ready_email_id,null);assert.equal(form.ready_email_sent_at,null);
   assert.equal(form.ready_email_error,'reminder_delivery_pending_or_unknown');
   sessionIn(f.id,1440);
-  assert.equal(rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v1('${f.id}','${marker}'))`),false);
-  assert.equal(rows('SELECT public.claim_stripe_intake_reminder_v1()'),null);
+  assert.equal(rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v2('${f.id}','${marker}',${scopeSql}))`),false);
+  assert.equal(rows(`SELECT public.claim_stripe_intake_reminder_v2(${scopeSql})`),null);
   sessionIn(f.id,30);f.db.from=original;
   assert.equal((await f.processStripeIntakeReminders()).sent,0);assert.equal(f.emails.length,n+1);
   assert.equal(booking(f.id).stripe_intake_email_started_at,marker);assert.deepEqual(intake(f.id),form);
@@ -403,7 +427,7 @@ for(const [status,code] of [[400,'reminder_delivery_rejected'],[500,'reminder_de
   const n=f.emails.length;assert.equal((await f.processStripeIntakeReminders()).sent,0);
   assert.equal(f.emails.length,n+1);assert.equal(intake(id).ready_email_error,code);
   const marker=booking(id).stripe_intake_email_started_at;
-  assert.equal(rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v1('${id}','${marker}'))`),false);
+  assert.equal(rows(`SELECT to_jsonb(public.release_unstarted_stripe_intake_reminder_v2('${id}','${marker}',${scopeSql}))`),false);
   assert.equal((await f.processStripeIntakeReminders()).sent,0);assert.equal(f.emails.length,n+1);
 });
 
@@ -418,4 +442,70 @@ for(const change of ['submitted','rescheduled','cancelled'])test(`${change} afte
   const n=f.emails.length;assert.equal((await f.processStripeIntakeReminders()).sent,1);
   assert.equal(f.emails.length,n+1);assert.ok(intake(id).ready_email_sent_at);
   assert.equal((await f.processStripeIntakeReminders()).sent,0);assert.equal(f.emails.length,n+1);
+});
+
+function coveredSession(purchaseId) {
+  const initial=booking(purchaseId),process=rows(`SELECT to_jsonb(p) FROM public.coaching_processes p WHERE id='${initial.process_id}'`);
+  day++;
+  return rows(`SELECT public.create_stripe_process_session_v1('${process.access_token_hash}',
+    current_date+interval '${day+1} days 12 hours',NULL,'${randomBytes(32).toString('hex')}',${scopeSql})`).booking_id;
+}
+
+for(const state of ['active','submitted','expired'])test(`package covered session reuses its one ${state} Intake and original private process access`,async()=>{
+  const f=fixture(),initialId=paidBooking('proceso');
+  assert.equal((await f.finalizePaidBooking(initialId)).completed,true);
+  const initial=booking(initialId),first=intake(initialId);
+  const process=rows(`SELECT to_jsonb(p) FROM public.coaching_processes p WHERE id='${initial.process_id}'`);
+  const processUrl=f.modules.load('src/lib/coaching/process-access.ts').recoverProcessAccessUrl(process,site);
+  const firstEmail=JSON.stringify(f.emails.find(mail=>mail.payload.to==='customer@example.test').payload.react);
+  assert.ok(firstEmail.includes(processUrl));
+  if(state==='submitted')stopReminders(initialId);
+  if(state==='expired')pg.sql(`UPDATE public.booking_intake_forms SET status='expired',expires_at=now()-interval '1 minute' WHERE id='${first.id}'`);
+  const before=intake(initialId),childId=coveredSession(initialId);
+  assert.equal((await f.finalizePaidBooking(childId)).completed,true);
+  const child=booking(childId),after=intake(initialId);
+  assert.equal(child.process_id,initial.process_id);assert.equal(child.package_session_number,2);
+  assert.equal(child.payment_reference,initial.payment_reference);assert.equal(child.payment_expires_at,initial.payment_expires_at);
+  assert.equal(child.finalization_status,'completed');assert.equal(child.status,'confirmed');
+  assert.equal(rows(`SELECT count(*) FROM public.booking_intake_forms WHERE process_id='${process.id}'`),1);
+  assert.deepEqual(after,before,'covered session must not reopen a form, rotate a token or reaccept consent');
+  const childEmail=JSON.stringify(f.emails.filter(mail=>mail.payload.to==='customer@example.test').at(-1).payload.react);
+  assert.ok(childEmail.includes(processUrl));assert.ok(childEmail.includes('Incluido en tu proceso'));
+  assert.equal(childEmail.includes('Completar formulario'),state!=='expired');
+  assert.equal(f.emails.filter(mail=>mail.options.idempotencyKey.startsWith('intake-ready/')).length,0);
+  assert.equal(rows(`SELECT count(*) FROM public.booking_payment_attempts WHERE booking_id='${childId}'`),0);
+});
+
+test('the one process Intake reminder may use a covered session, but never sends a second reminder for that shared form',async()=>{
+  const f=fixture(),initialId=paidBooking('proceso');
+  assert.equal((await f.finalizePaidBooking(initialId)).completed,true);
+  const form=intake(initialId),childId=coveredSession(initialId);
+  assert.equal((await f.finalizePaidBooking(childId)).completed,true);
+  sessionIn(initialId,-180);pg.sql(`UPDATE public.bookings SET status='completed' WHERE id='${initialId}'`);
+  sessionIn(childId,30);
+  const before=f.emails.length;
+  assert.equal((await f.processStripeIntakeReminders()).sent,1);
+  assert.equal(f.emails.length,before+1);
+  assert.equal(f.emails.at(-1).options.idempotencyKey,`intake-ready/${form.id}`);
+  assert.ok(booking(childId).stripe_intake_email_started_at);
+  assert.equal(booking(initialId).stripe_intake_email_started_at,null);
+  const saved=intake(initialId);
+  assert.equal((await f.processStripeIntakeReminders()).sent,0);
+  assert.deepEqual(intake(initialId),saved);assert.equal(f.emails.length,before+1);
+});
+
+test('authorized replacement of ordinal one finalizes as covered without a new charge or reopened Intake',async()=>{
+  const f=fixture(),id=paidBooking('proceso');assert.equal((await f.finalizePaidBooking(id)).completed,true);
+  const original=intake(id),process=rows(`SELECT to_jsonb(p) FROM public.coaching_processes p WHERE id='${booking(id).process_id}'`);
+  pg.sql(`UPDATE public.bookings SET starts_at=now()-interval '2 hours',ends_at=now()-interval '30 minutes' WHERE id='${id}';
+    SELECT public.resolve_stripe_session_v1('${id}','no_show','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',${scopeSql});
+    SELECT public.resolve_stripe_session_v1('${id}','approve_replacement','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',${scopeSql});
+    UPDATE public.booking_intake_forms SET status='expired',expires_at=now()-interval '1 second' WHERE id='${original.id}'`);
+  const childId=coveredSession(id);assert.equal(booking(childId).package_session_number,1);
+  assert.equal((await f.finalizePaidBooking(childId)).completed,true);
+  assert.equal(booking(childId).payment_reference,booking(id).payment_reference);
+  assert.equal(rows(`SELECT to_jsonb(count(*)) FROM public.booking_payment_attempts WHERE booking_id='${childId}'`),0);
+  assert.equal(rows(`SELECT to_jsonb(count(*)) FROM public.booking_intake_forms WHERE process_id='${process.id}'`),1);
+  assert.equal(intake(id).id,original.id);assert.equal(intake(id).access_token_hash,original.access_token_hash);
+  assert.equal(intake(id).status,'expired');
 });

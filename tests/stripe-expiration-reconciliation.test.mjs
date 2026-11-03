@@ -1,3 +1,5 @@
+import { liveFixture, liveMigrations } from './helpers/stripe-live-postgres.mjs';
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { before, beforeEach, after, test } from 'node:test';
@@ -12,12 +14,7 @@ const literal=x=>x===null?'NULL':`'${String(x).replaceAll("'","''")}'`;
 const json=q=>JSON.parse(pg.sql(q)||'null');
 let day=0;
 before(()=>{
-  pg.start(new URL('./fixtures/stripe-local-schema.sql',import.meta.url),[
-    new URL('../supabase/migrations/20261027000100_activate_booking_intake_v2.sql',import.meta.url),
-    new URL('../supabase/migrations/20261028000100_stripe_test_booking_lifecycle.sql',import.meta.url),
-    new URL('../supabase/migrations/20261028000200_intake_v2_stable_service_identity.sql',import.meta.url),
-    new URL('../supabase/migrations/20261028201527_stripe_failed_attempt_recovery.sql',import.meta.url),
-  ]);
+  pg.start(liveFixture,liveMigrations);
   // Mirror timestamp triggers so equality assertions detect redundant writes.
   pg.sql(`CREATE FUNCTION public.fixture_touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=clock_timestamp(); RETURN NEW; END $$;
     CREATE TRIGGER fixture_booking_touch BEFORE UPDATE ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.fixture_touch();
@@ -30,11 +27,11 @@ function fixture({age=MIN,last=null,status='cancelled',payment='pending',reconci
   const hash=randomBytes(32).toString('hex'),future=iso(Date.UTC(2038,0,1+day++*2,12));
   const b=json(`SELECT public.create_stripe_booking_hold_v1('sesion-1-1',${literal(future)},'Fixture','fixture@example.test',NULL,NULL,${literal(hash)});`);
   const c=json(`SELECT public.claim_stripe_checkout_v1(${literal(b.booking_id)},${literal(hash)},gen_random_uuid(),'http://localhost:3000');`);
-  pg.sql(`UPDATE public.bookings SET created_at=${literal(iso(BASE-age-30*MIN))},payment_expires_at=${literal(iso(BASE-age))},
+  pg.sql(`UPDATE public.bookings SET stripe_mode='test',stripe_account_id='acct_fixture',stripe_site_origin='http://localhost:3000',created_at=${literal(iso(BASE-age-30*MIN))},payment_expires_at=${literal(iso(BASE-age))},
     stripe_expiration_last_attempt_at=${literal(last===null?null:iso(last))},stripe_expiration_reconciled_at=${literal(reconciled===null?null:iso(reconciled))},
     status=${literal(status)},payment_status=${literal(payment)},expired_at=${status==='cancelled'?literal(iso(BASE-age+3000)):'NULL'},
     cancellation_reason=${status==='cancelled'?"'payment_expired'":'NULL'}${reference?`,booking_reference=${literal(reference)}`:''} WHERE id=${literal(b.booking_id)};
-    UPDATE public.booking_payment_attempts SET status=${literal(attemptStatus)},checkout_creation_state='ambiguous',
+    UPDATE public.booking_payment_attempts SET stripe_mode='test',stripe_account_id='acct_fixture',stripe_site_origin='http://localhost:3000',status=${literal(attemptStatus)},checkout_creation_state='ambiguous',
       created_at=${literal(iso(BASE-age-MIN))},lease_owner=NULL,lease_until=NULL,
       stripe_checkout_session_id=${literal(sessionId)},last_error=${attemptStatus==='unknown'?"'expiration_requires_reconciliation'":'NULL'}
       WHERE id=${literal(c.attempt.id)};`);
@@ -44,8 +41,8 @@ const booking=h=>json(`SELECT to_jsonb(b) FROM public.bookings b WHERE id=${lite
 const attempt=h=>json(`SELECT to_jsonb(a) FROM public.booking_payment_attempts a WHERE id=${literal(h.attemptId)};`);
 function session(h,changes={}){
   const b=booking(h),a=attempt(h);
-  return {id:a.stripe_checkout_session_id??`cs_test_${a.id.replaceAll('-','')}`,livemode:false,mode:'payment',
-    client_reference_id:h.id,metadata:{booking_id:h.id,payment_attempt_id:h.attemptId},amount_total:50000,currency:'mxn',
+  return {id:a.stripe_checkout_session_id??`cs_test_${a.id.replaceAll('-','')}`,livemode:false,payment_method_types:["card"],mode:'payment',
+    client_reference_id:h.id,metadata:{stripe_mode:"test",stripe_account_id:"acct_fixture",booking_id:h.id,payment_attempt_id:h.attemptId},amount_total:50000,currency:'mxn',
     payment_status:'unpaid',status:'expired',expires_at:Math.floor((Date.parse(b.payment_expires_at)+HOUR)/1000),...changes};
 }
 function harness({remote=null,pages=null,error=null,beforeResponse=null}={}){
@@ -57,7 +54,7 @@ function harness({remote=null,pages=null,error=null,beforeResponse=null}={}){
     async expire(id){calls.expire.push(id);if(error)throw error;return {...remote,status:'expired'};},
     create(){calls.create++;throw new Error('Must never create Checkout after deadline');},
   }}};
-  const modules=testModules({'@/lib/stripe/server':{getStripeBookingAdmin:()=>db,getStripeTestClient:()=>stripe}});
+  const modules=testModules({'@/lib/stripe/server':stripeRuntimeFixture(db,stripe)});
   return {...modules.load('src/lib/stripe/expire-hold.ts'),db,calls};
 }
 const affected=h=>h.db.stats.updates.reduce((n,x)=>n+x.rows,0);
@@ -172,7 +169,7 @@ test('checkout.session.expired replay stays idempotent after worker reconciliati
   const h=fixture({status:'pending',attemptStatus:'open',sessionId:'cs_test_webhook'}),remote=session(h),s=harness({remote});
   await s.expireDueStripeHolds(BASE);
   const payload={...remote,metadata:{...remote.metadata,booking_reference:booking(h).booking_reference}};
-  const eventSql=`SELECT public.apply_stripe_checkout_event_v1('evt_expiration_fixture','checkout.session.expired',${literal(JSON.stringify(payload))}::jsonb);`;
+  const eventSql=`SELECT public.apply_stripe_checkout_event_v2('evt_expiration_fixture','checkout.session.expired',${literal(JSON.stringify(payload))}::jsonb,'test','acct_fixture');`;
   json(eventSql);const b=booking(h),a=attempt(h);
   const event=pg.sql("SELECT to_jsonb(e) FROM public.stripe_events e WHERE stripe_event_id='evt_expiration_fixture';");
   assert.equal(json(eventSql).duplicate,true);assert.deepEqual(booking(h),b);assert.deepEqual(attempt(h),a);

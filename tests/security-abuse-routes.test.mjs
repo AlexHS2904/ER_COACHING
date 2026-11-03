@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { testModules } from './helpers/load-typescript.mjs';
@@ -59,12 +60,7 @@ function fixture({ deny = () => 429 } = {}) {
     '@/lib/supabase/proxy': { updateSession: async () => {
       effects.push({ name: 'session refresh' }); return new AppResponse(null, { status: 200 });
     } },
-    '@/lib/stripe/server': {
-      getStripeTestSiteUrl: () => site,
-      getStripeTestClient: () => ({}),
-      getStripeBookingAdmin: () => db,
-      isStripeTestCheckoutEnabled: () => true,
-    },
+    '@/lib/stripe/server': {...stripeRuntimeFixture(db),isStripeCheckoutEnabled:()=>true,isStripeTestCheckoutEnabled:()=>true},
     '@/lib/stripe/checkout': { createOrRecoverCheckout: async (...args) => {
       effects.push({ name: 'checkout', args });
       return { url: 'https://checkout.stripe.com/c/pay/fixture-only' };
@@ -241,7 +237,7 @@ test('signed Stripe webhook remains functional without invoking public abuse lim
   const modules = testModules({
     'next/server': { NextResponse: AppResponse, after() { assert.fail('Unaccepted fixture must not finalize'); } },
     '@/lib/security/public-abuse': { enforcePublicAbuse: async () => { abuseCalls++; assert.fail('Webhook must bypass public limiter'); } },
-    '@/lib/stripe/server': { getStripeTestClient: () => ({ webhooks: { constructEvent: () => ({ livemode: false }) } }) },
+    '@/lib/stripe/server': stripeRuntimeFixture(undefined,{webhooks:{constructEvent:()=>({livemode:false})}}),
     '@/lib/stripe/webhook': { applyStripeCheckoutEvent: async () => { applied++; return { accepted: false }; } },
     '@/lib/bookings/finalize-paid-booking': { finalizePaidBooking: async () => assert.fail('No finalization') },
   }, { NODE_ENV: 'production', STRIPE_WEBHOOK_SECRET: 'whsec_fixture_not_a_real_secret' });
@@ -260,7 +256,7 @@ test('internal worker keeps its Bearer authorization and bypasses public abuse l
   const modules = testModules({
     'next/server': { NextResponse: AppResponse },
     '@/lib/security/public-abuse': { enforcePublicAbuse: async () => { abuseCalls++; assert.fail('Worker must bypass public limiter'); } },
-    '@/lib/stripe/server': { getStripeTestClient: () => ({}) },
+    '@/lib/stripe/server': stripeRuntimeFixture(undefined,{}),
     '@/lib/stripe/process-pending': { processPendingStripeBookings: async () => { processed++; return { processed: 0 }; } },
   }, { NODE_ENV: 'production', STRIPE_LOCAL_WORKER_SECRET: secret });
   const route = modules.load('src/app/api/internal/stripe/process-pending/route.ts');

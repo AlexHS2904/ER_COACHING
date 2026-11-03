@@ -1,5 +1,6 @@
 import "server-only";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { hasVerifiedProcessPurchase } from "@/lib/coaching/process-entitlement";
 
 import {
   getSupabaseAdmin,
@@ -96,6 +97,14 @@ export async function getIntakeByToken(
           string;
         payment_status:
           string;
+        process_id: string | null;
+        package_session_number: number | null;
+        payment_flow: string | null;
+        payment_provider: string | null;
+        payment_reference: string | null;
+        paid_at: string | null;
+        stripe_mode: string | null;
+        stripe_account_id: string | null;
       }
     | null =
     null;
@@ -121,7 +130,9 @@ export async function getIntakeByToken(
           service_name_snapshot,
           starts_at,
           status,
-          payment_status
+          payment_status,
+          process_id, package_session_number, payment_flow, payment_provider, payment_reference, paid_at,
+          stripe_mode, stripe_account_id
         `,
       )
       .eq(
@@ -162,8 +173,17 @@ export async function getIntakeByToken(
      para invitaciones manuales.
   ===================================================== */
 
+  let processEntitlementActive = false;
+  if (form.process_id && booking) {
+    const process = await supabase.from("coaching_processes")
+      .select("id,status,purchase_booking_id,total_sessions,stripe_mode,stripe_account_id")
+      .eq("id", form.process_id).maybeSingle();
+    processEntitlementActive = !process.error && process.data !== null &&
+      process.data.purchase_booking_id === booking.id && hasVerifiedProcessPurchase(process.data, booking);
+  }
   return {
     form,
     booking,
+    processEntitlementActive,
   };
 }

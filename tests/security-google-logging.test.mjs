@@ -105,6 +105,7 @@ function cancellationFixture({ calendarError = null, databaseError = null } = {}
     } }) },
     '@/lib/google/calendar': { deleteGoogleCalendarEvent: async () => { if (calendarError) throw calendarError; } },
     '@/lib/email/send-booking-change-email': { sendBookingChangeEmail: async () => { throw new Error('No email after failed cancellation'); } },
+    '@/lib/bookings/stripe-booking-changes': { requestStripeBookingChange: async () => assert.fail('Legacy fixture must not use Stripe changes') },
   });
   const route = modules.load('src/app/api/bookings/[id]/cancel/route.ts');
   return { run: () => route.POST({}, { params: Promise.resolve({ id: booking.id }) }), logs: modules.logs, get updates() { return updates; } };

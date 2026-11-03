@@ -28,6 +28,6 @@ export function hasDurableCurrentBookingAcceptance(value: unknown): boolean {
     typeof timestamp === "string" && timestamp.trim() !== "" && Number.isFinite(Date.parse(timestamp));
   return hasTimestamp(booking.legal_terms_accepted_at) &&
     hasTimestamp(booking.legal_adult_confirmed_at) &&
-    booking.legal_terms_version === LEGAL_TERMS_VERSION &&
+    [LEGAL_TERMS_VERSION, "2026-10-29.2"].includes(booking.legal_terms_version as string) &&
     booking.legal_privacy_notice_version === PRIVACY_NOTICE_VERSION;
 }

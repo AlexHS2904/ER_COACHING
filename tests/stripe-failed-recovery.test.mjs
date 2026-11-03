@@ -1,3 +1,5 @@
+import { liveMigrations } from './helpers/stripe-live-postgres.mjs';
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -10,28 +12,29 @@ import { testModules } from './helpers/load-typescript.mjs';
 const Stripe=createRequire(import.meta.url)('stripe');
 const pg=localPostgres();
 const migration=new URL('../supabase/migrations/20261028201527_stripe_failed_attempt_recovery.sql',import.meta.url);
-const literal=x=>x===null?'NULL':`'${String(x).replaceAll("'","''")}'`;
+const literal=x=>x===null?'NULL':`'${(typeof x==='object'?JSON.stringify(x):String(x)).replaceAll("'","''")}'`;
 const json=q=>JSON.parse(pg.sql(q)||'null');
 const rpcSql=(name,args)=>`SELECT to_jsonb(public.${name}(${Object.entries(args).map(([k,v])=>`${k} => ${literal(v)}`).join(',')}));`;
 const rpc=(name,args)=>json(rpcSql(name,args));
-let day=0;
+let day=0,liveReady=false;
+const scopeArgs={p_stripe_mode:"test",p_stripe_account_id:"acct_fixture"};
 function hold(){
   const hash=randomBytes(32).toString('hex');
   const time=new Date(Date.UTC(2036,0,1+day++*2,12)).toISOString();
-  const b=rpc('create_stripe_booking_hold_v1',{p_service_slug:'sesion-1-1',p_starts_at:time,
+  const b=rpc(liveReady?'create_stripe_booking_hold_with_legal_v2':'create_stripe_booking_hold_v1',{...(liveReady?{...scopeArgs,p_site_url:'http://localhost:3000',p_legal_acceptance:testModules().load('src/lib/legal/acceptance.ts').currentBookingAcceptance}:{}),p_service_slug:'sesion-1-1',p_starts_at:time,
     p_customer_name:'Fixture',p_customer_email:'fixture@example.test',p_customer_phone:null,p_notes:null,p_access_token_hash:hash});
   return {id:b.booking_id,hash};
 }
 const booking=h=>json(`SELECT to_jsonb(b) FROM public.bookings b WHERE id=${literal(h.id)};`);
 const attempts=h=>json(`SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY created_at,id),'[]') FROM public.booking_payment_attempts a WHERE booking_id=${literal(h.id)};`);
-const claim=(h,owner=randomUUID())=>({owner,...rpc('claim_stripe_checkout_v1',{
+const claim=(h,owner=randomUUID())=>({owner,...rpc(booking(h).stripe_mode?'claim_stripe_checkout_v2':'claim_stripe_checkout_v1',{...(booking(h).stripe_mode?{...scopeArgs,p_payment_method_configuration_id:'pmc_fixture'}:{}),
   p_booking_id:h.id,p_access_token_hash:h.hash,p_owner:owner,p_site_url:'http://localhost:3000'})});
-const begin=(h,a)=>rpc('begin_stripe_checkout_creation_v1',{p_booking_id:h.id,p_attempt_id:a.attempt.id,p_owner:a.owner});
-const record=(h,a,status='failed')=>rpc('record_stripe_checkout_failure_v1',{
+const begin=(h,a)=>rpc(booking(h).stripe_mode?'begin_stripe_checkout_creation_v2':'begin_stripe_checkout_creation_v1',{...(booking(h).stripe_mode?scopeArgs:{}),p_booking_id:h.id,p_attempt_id:a.attempt.id,p_owner:a.owner});
+const record=(h,a,status='failed')=>rpc(booking(h).stripe_mode?'record_stripe_checkout_failure_v2':'record_stripe_checkout_failure_v1',{...(booking(h).stripe_mode?scopeArgs:{}),
   p_booking_id:h.id,p_attempt_id:a.attempt.id,p_owner:a.owner,p_status:status,
   p_error:status==='failed'?'stripe_invalid_request':'stripe_request_unknown'});
 function rejected(h){const a=claim(h);assert.equal(begin(h,a),true);assert.equal(record(h,a),true);return attempts(h)[0];}
-function payloadWithoutAttempt(p){const result=structuredClone(p);delete result.metadata.payment_attempt_id;return result;}
+function payloadWithoutAttempt(p){const result=structuredClone(p);delete result.metadata.payment_attempt_id;if(result.payment_intent_data)delete result.payment_intent_data.metadata.payment_attempt_id;return result;}
 const invalid=()=>new Stripe.errors.StripeInvalidRequestError({type:'invalid_request_error',statusCode:400,param:'payment_method_types'});
 
 let legacy;
@@ -45,13 +48,15 @@ before(()=>{
   pg.sql(`UPDATE public.booking_payment_attempts SET status='unknown',last_error='stripe_request_unknown',lease_owner=NULL,lease_until=NULL WHERE id=${literal(a.attempt.id)};`);
   legacy={h,attempt:attempts(h)[0],booking:booking(h),holdDefinition:pg.sql("SELECT md5(pg_get_functiondef('public.create_stripe_booking_hold_v1(text,timestamptz,text,text,text,text,text)'::regprocedure));")};
   pg.sql(readFileSync(migration,'utf8'));
+  for(const extra of liveMigrations.slice(4))pg.sql(readFileSync(extra,'utf8'));
+  liveReady=true;
 });
 after(()=>pg.stop());
 
 test('initial migration preserves pre-existing booking/attempt fields and defaults provenance to ambiguous',()=>{
   const a=attempts(legacy.h)[0];const {checkout_creation_state,...original}=a;
-  assert.equal(checkout_creation_state,'ambiguous');assert.deepEqual(original,legacy.attempt);
-  assert.deepEqual(booking(legacy.h),legacy.booking);
+  assert.equal(checkout_creation_state,'ambiguous');assert.deepEqual(Object.fromEntries(Object.keys(legacy.attempt).map(k=>[k,original[k]])),legacy.attempt);
+  assert.deepEqual(Object.fromEntries(Object.keys(legacy.booking).map(k=>[k,booking(legacy.h)[k]])),legacy.booking);
   assert.equal(pg.sql("SELECT md5(pg_get_functiondef('public.create_stripe_booking_hold_v1(text,timestamptz,text,text,text,text,text)'::regprocedure));"),legacy.holdDefinition);
   const retry=claim(legacy.h);assert.equal(begin(legacy.h,retry),false);assert.equal(record(legacy.h,retry),true);
   assert.equal(attempts(legacy.h).length,1);assert.equal(attempts(legacy.h)[0].status,'unknown');
@@ -70,7 +75,7 @@ function service({error=null,saveFailure=null,failureWrite=false,afterSend=null,
       if(afterSend)await afterSend();
       if(error)throw error;
       if(!calls.sessions.has(options.idempotencyKey))calls.sessions.set(options.idempotencyKey,{
-        id:`cs_test_${randomUUID().replaceAll('-','')}`,livemode:false,mode:'payment',status:'open',payment_status:'unpaid',
+        id:`cs_test_${randomUUID().replaceAll('-','')}`,livemode:false,payment_method_types:["card"],mode:'payment',status:'open',payment_status:'unpaid',
         client_reference_id:payload.client_reference_id,metadata:payload.metadata,amount_total:payload.line_items[0].price_data.unit_amount,
         currency:payload.line_items[0].price_data.currency,expires_at:payload.expires_at,url:'https://checkout.stripe.com/c/pay/test',
       });
@@ -106,10 +111,10 @@ function service({error=null,saveFailure=null,failureWrite=false,afterSend=null,
       }};
     return query;
   },async rpc(name,args){
-    if(name==='create_stripe_booking_hold_with_legal_v1') {
+    if(name==='create_stripe_booking_hold_with_legal_v2') {
       assert.deepEqual(args.p_legal_acceptance,testModules().load('src/lib/legal/acceptance.ts').currentBookingAcceptance);
-      const {p_legal_acceptance,...originalArgs}=args;
-      const data=rpc('create_stripe_booking_hold_v1',originalArgs);
+      const {p_legal_acceptance}=args;
+      const data=rpc(name,args);
       if(!calls.legalEvidence.has(data.booking_id)) calls.legalEvidence.set(data.booking_id,structuredClone(p_legal_acceptance));
       return {data,error:null};
     }
@@ -120,14 +125,14 @@ function service({error=null,saveFailure=null,failureWrite=false,afterSend=null,
       if(!calls.legalEvidence.has(existing.id)) calls.legalEvidence.set(existing.id,structuredClone(args.p_legal_acceptance));
       return {data:true,error:null};
     }
-    if(name==='save_stripe_checkout_v1'&&fail==='before'){fail=null;return {data:null,error:{message:'database unavailable'}};}
-    if(name==='record_stripe_checkout_failure_v1'&&writeFail){writeFail=false;return {data:null,error:{message:'database unavailable'}};}
+    if(name==='save_stripe_checkout_v2'&&fail==='before'){fail=null;return {data:null,error:{message:'database unavailable'}};}
+    if(name==='record_stripe_checkout_failure_v2'&&writeFail){writeFail=false;return {data:null,error:{message:'database unavailable'}};}
     let data;
     try {data=rpc(name,args);} catch(e){return {data:null,error:{message:e.message.match(/ERROR:\s+([^\n]+)/)?.[1]??'database error'}};}
-    if(name==='save_stripe_checkout_v1'&&fail==='after'){fail=null;throw new Error('lost committed response');}
+    if(name==='save_stripe_checkout_v2'&&fail==='after'){fail=null;throw new Error('lost committed response');}
     return {data,error:null};
   }};
-  const modules=testModules({'@/lib/stripe/server':{getStripeTestClient:()=>stripe,getStripeBookingAdmin:()=>db,getStripeTestSiteUrl:()=> 'http://localhost:3000'},
+  const modules=testModules({'@/lib/stripe/server':stripeRuntimeFixture(db,stripe),
     'next/server':{NextResponse:{json:(data,init={})=>({data,status:init.status??200,cookies:{saved:[],set(...args){this.saved.push(args);}}})}},
     '@/lib/bookings/finalize-paid-booking':{finalizePaidBooking:async()=>{throw new Error('Unpaid failed-recovery test must never finalize');}},
     '@/lib/bookings/intake-destination':{bookingIntakeDestination:async(owned)=>{assert.equal(owned.payment_status,'pending');return {status:'waiting',redirectIntakeUrl:null};}},
@@ -204,7 +209,8 @@ test('deterministic 400 persists failed, successor opens with new key and same h
   assert.equal(pg.sql(`SELECT count(*) FROM public.booking_payment_attempts WHERE booking_id=${literal(h.id)} AND status IN ('creating','open','unknown');`),'1');
   const session=[...success.calls.sessions.values()][0];
   const paid={...session,status:'complete',payment_status:'paid',payment_intent:`pi_${a.id.replaceAll('-','')}`};
-  const receipt=json(`SELECT public.apply_stripe_checkout_event_v1('evt_recovered_${a.id}','checkout.session.completed',${literal(JSON.stringify(paid))}::jsonb);`);
+  paid.verified_payment_intent={id:paid.payment_intent,status:'succeeded',amount:50000,amount_received:50000,currency:'mxn',livemode:false,metadata:paid.metadata};
+  const receipt=json(`SELECT public.apply_stripe_checkout_event_v2('evt_recovered_${a.id}','checkout.session.completed',${literal(JSON.stringify(paid))}::jsonb,'test','acct_fixture');`);
   assert.equal(receipt.accepted,true);
   assert.equal(booking(h).payment_status,'paid');
   // No Calendar/email APIs: drive the existing finalization contract with local doubles.
@@ -213,7 +219,7 @@ test('deterministic 400 persists failed, successor opens with new key and same h
   const step=(name,data={})=>json(`SELECT public.save_stripe_finalization_v1(${literal(h.id)},${literal(owner)},${literal(name)},${literal(JSON.stringify(data))}::jsonb);`);
   step('calendar',{eventId:'fixture-event',meetUrl:'https://meet.google.com/fixture'});
   step('customer_email',{id:'fixture-customer-email'});step('coach_email',{id:'fixture-coach-email'});
-  json(`SELECT to_jsonb(r) FROM public.activate_booking_intake_v2(${literal(h.id)},${literal(randomBytes(32).toString('hex'))},'fixture-encrypted','stripe',${literal(paid.payment_intent)}) r;`);
+  json(`SELECT to_jsonb(r) FROM public.activate_booking_intake_v2(${literal(h.id)},${literal(randomBytes(32).toString('hex'))},${literal(testModules({}, {INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')}).load('src/lib/intake/intake-token-crypto.ts').encryptIntakeToken('c'.repeat(64)))},'stripe',${literal(paid.payment_intent)}) r;`);
   pg.sql(`UPDATE public.booking_intake_forms SET ready_email_sent_at=now() WHERE booking_id=${literal(h.id)};`);
   step('completed');assert.equal(booking(h).finalization_status,'completed');
   assert.deepEqual(attempts(h).find(x=>x.id===failed.id),failed);

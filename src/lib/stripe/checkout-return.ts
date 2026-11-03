@@ -1,6 +1,6 @@
 import "server-only";
 import type Stripe from "stripe";
-import { getStripeBookingAdmin, getStripeTestClient } from "@/lib/stripe/server";
+import { assertStripeRecordScope, getStripeBookingAdmin, getVerifiedStripeContext, getStripeConfig, type StripeConfig } from "@/lib/stripe/server";
 import { hasBookingAccess, hashBookingAccess, isBookingId } from "@/lib/stripe/access";
 import { StripeBookingError } from "@/lib/stripe/errors";
 import { toStripeMinorUnits } from "@/lib/stripe/money";
@@ -8,11 +8,16 @@ import { applyStripeCheckoutEvent } from "@/lib/stripe/webhook";
 import { finalizePaidBooking } from "@/lib/bookings/finalize-paid-booking";
 import { bookingIntakeDestination } from "@/lib/bookings/intake-destination";
 
-const BOOKING_COLUMNS = "id,booking_reference,created_at,status,payment_status,payment_flow,finalization_status,next_finalization_at,expired_at,payment_expires_at,booking_access_token_hash,price_snapshot,currency_snapshot,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at";
+const BOOKING_COLUMNS = "id,process_id,package_session_number,stripe_mode,stripe_account_id,stripe_site_origin,booking_reference,created_at,status,payment_status,payment_flow,finalization_status,next_finalization_at,expired_at,payment_expires_at,booking_access_token_hash,price_snapshot,currency_snapshot,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at";
 const MAX_EVENT_PAGES = 3;
 
 export type OwnedStripeBooking = {
   id: string;
+  process_id: string | null;
+  package_session_number: number | null;
+  stripe_mode: "test" | "live" | null;
+  stripe_account_id: string | null;
+  stripe_site_origin: string | null;
   booking_reference: string;
   created_at: string;
   status: string;
@@ -32,6 +37,9 @@ export type OwnedStripeBooking = {
 };
 
 type ReturnAttempt = {
+  stripe_mode: "test" | "live";
+  stripe_account_id: string;
+  stripe_site_origin: string;
   id: string;
   booking_id: string;
   created_at: string;
@@ -64,15 +72,18 @@ function paymentIntentId(session: Stripe.Checkout.Session) {
   return typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
 }
 
-function assertSessionIdentity(session: Stripe.Checkout.Session, booking: OwnedStripeBooking, attempt: ReturnAttempt) {
+function assertSessionIdentity(session: Stripe.Checkout.Session, booking: OwnedStripeBooking, attempt: ReturnAttempt, config: StripeConfig) {
+  assertStripeRecordScope(booking, config);
+  assertStripeRecordScope(attempt, config);
   let amount: number;
   try { amount = toStripeMinorUnits(booking.price_snapshot, booking.currency_snapshot); }
   catch { throw new StripeBookingError("review_required"); }
   const intent = paymentIntentId(session);
-  if (session.object !== "checkout.session" || session.livemode !== false || session.mode !== "payment" ||
+  if (session.object !== "checkout.session" || session.livemode !== (config.mode === "live") || session.mode !== "payment" ||
       session.id !== attempt.stripe_checkout_session_id || attempt.booking_id !== booking.id ||
       session.client_reference_id !== booking.id || session.metadata?.booking_id !== booking.id ||
       session.metadata?.payment_attempt_id !== attempt.id ||
+      session.metadata?.stripe_mode !== config.mode || session.metadata?.stripe_account_id !== config.accountId ||
       session.metadata?.booking_reference !== booking.booking_reference ||
       String(attempt.amount_minor) !== String(amount) || session.amount_total !== amount ||
       attempt.currency !== booking.currency_snapshot.toLowerCase() || session.currency !== attempt.currency ||
@@ -82,7 +93,7 @@ function assertSessionIdentity(session: Stripe.Checkout.Session, booking: OwnedS
 }
 
 async function completedEventForSession(
-  stripe: Stripe, session: Stripe.Checkout.Session, booking: OwnedStripeBooking, attempt: ReturnAttempt,
+  stripe: Stripe, session: Stripe.Checkout.Session, booking: OwnedStripeBooking, attempt: ReturnAttempt, config: StripeConfig,
 ): Promise<Stripe.Event | null> {
   const createdAt = Date.parse(attempt.created_at);
   if (!Number.isFinite(createdAt)) return null;
@@ -97,10 +108,10 @@ async function completedEventForSession(
       if (event.type !== "checkout.session.completed") continue;
       const eventSession = event.data.object as Stripe.Checkout.Session;
       if (eventSession.id !== session.id) continue;
-      if (event.livemode !== false || !/^evt_[A-Za-z0-9]+$/.test(event.id)) {
+      if (event.livemode !== (config.mode === "live") || (event.account && event.account !== config.accountId) || !/^evt_[A-Za-z0-9]+$/.test(event.id)) {
         throw new StripeBookingError("invalid_access");
       }
-      assertSessionIdentity(eventSession, booking, attempt);
+      assertSessionIdentity(eventSession, booking, attempt, config);
       if (eventSession.status !== "complete" || eventSession.payment_status !== "paid" ||
           paymentIntentId(eventSession) !== paymentIntentId(session)) {
         throw new StripeBookingError("invalid_access");
@@ -120,11 +131,11 @@ async function completedEventForSession(
 export async function reconcileStripeCheckoutReturn(bookingId: string, accessToken: unknown, sessionId?: string) {
   let booking = await getOwnedStripeBooking(bookingId, accessToken);
   const db = getStripeBookingAdmin();
-  if (sessionId !== undefined && !/^cs_test_[A-Za-z0-9]+$/.test(sessionId)) {
+  if (sessionId !== undefined && !/^cs_(?:test_|live_)?[A-Za-z0-9]+$/.test(sessionId)) {
     throw new StripeBookingError("invalid_access");
   }
   let query = db.from("booking_payment_attempts")
-    .select("id,booking_id,created_at,amount_minor,currency,stripe_checkout_session_id,stripe_payment_intent_id")
+    .select("id,booking_id,created_at,amount_minor,currency,stripe_checkout_session_id,stripe_payment_intent_id,stripe_mode,stripe_account_id,stripe_site_origin")
     .eq("booking_id", booking.id);
   query = sessionId !== undefined
     ? query.eq("stripe_checkout_session_id", sessionId)
@@ -139,19 +150,22 @@ export async function reconcileStripeCheckoutReturn(bookingId: string, accessTok
     let stripe: Stripe;
     let session: Stripe.Checkout.Session;
     try {
-      stripe = getStripeTestClient();
+      const context = await getVerifiedStripeContext();
+      stripe = context.stripe;
+      assertStripeRecordScope(booking, context.config);
+      assertStripeRecordScope(attempt, context.config);
       session = await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_session_id);
     } catch {
       return { booking, intake: await bookingIntakeDestination(booking, accessToken), observation: "unknown" as const };
     }
-    assertSessionIdentity(session, booking, attempt);
+    assertSessionIdentity(session, booking, attempt, getStripeConfig());
     if (session.status === "complete" && session.payment_status === "paid") {
       if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId(session) ?? "")) throw new StripeBookingError("invalid_access");
       // A paid observation suppresses another Checkout even if Stripe's Event
       // listing is momentarily unavailable. Polling may recover it safely.
       observation = "processing";
       try {
-        const event = await completedEventForSession(stripe, session, booking, attempt);
+        const event = await completedEventForSession(stripe, session, booking, attempt, getStripeConfig());
         if (event) {
           const applied = await applyStripeCheckoutEvent(event);
           if (applied?.booking_id && applied.booking_id !== booking.id) throw new StripeBookingError("invalid_access");
@@ -176,7 +190,11 @@ export async function reconcileStripeCheckoutReturn(bookingId: string, accessTok
     : Number.isFinite(Date.parse(booking.next_finalization_at)) && Date.parse(booking.next_finalization_at) <= Date.now();
   if (booking.payment_status === "paid" && booking.status !== "cancelled" && finalizationDue &&
       !["completed", "review_required"].includes(booking.finalization_status ?? "")) {
-    try { await finalizePaidBooking(booking.id); } catch {
+    try {
+      const config = getStripeConfig();
+      assertStripeRecordScope(booking, config);
+      await finalizePaidBooking(booking.id, { mode: config.mode, accountId: config.accountId });
+    } catch {
       // Finalizer leases and persisted outcomes support a later authorized
       // refresh/webhook/worker. A return must never create another payment.
     }

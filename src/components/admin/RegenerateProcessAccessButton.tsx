@@ -140,7 +140,7 @@ export default function RegenerateProcessAccessButton({
             hover:bg-brand-wine/5
           "
         >
-          Regenerar acceso
+          Enviar acceso
         </button>
       ) : (
         <div
@@ -159,7 +159,7 @@ export default function RegenerateProcessAccessButton({
               text-brand-brown
             "
           >
-            ¿Generar un nuevo enlace?
+            ¿Enviar el acceso privado?
           </p>
 
           <p
@@ -170,7 +170,7 @@ export default function RegenerateProcessAccessButton({
               text-brand-brown/55
             "
           >
-            Se enviará un nuevo
+            Se enviará el
             acceso a{" "}
 
             <strong>
@@ -179,9 +179,7 @@ export default function RegenerateProcessAccessButton({
               }
             </strong>
 
-            . El enlace privado
-            anterior dejará de
-            funcionar.
+            . En los procesos pagados con Stripe se conserva el enlace original.
           </p>
 
           <div
@@ -216,7 +214,7 @@ export default function RegenerateProcessAccessButton({
             >
               {loading
                 ? "Enviando..."
-                : "Sí, regenerar"}
+                : "Sí, enviar"}
             </button>
 
             <button

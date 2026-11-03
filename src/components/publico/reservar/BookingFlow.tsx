@@ -1637,6 +1637,13 @@ const [
                   </div>
                 </div>
 
+                {currentService.service_type === "package" && currentService.session_count === 6 && (
+                  <p className="mb-4 text-sm leading-6 text-brand-brown/70">
+                    Tu paquete incluye 6 sesiones de 90 minutos, con vigencia de 90 días naturales desde el pago.
+                    Las cancelaciones con menos de 24 h quedan a revisión de Edna; no se repone ni consume definitivamente la sesión mientras se decide.
+                    Una inasistencia sin aviso utiliza la sesión, salvo excepción autorizada o derechos legales.
+                  </p>
+                )}
                 <BookingLegalAcceptance checked={termsAccepted} onChange={setTermsAccepted} concise />
 
                 {/* ERROR */}

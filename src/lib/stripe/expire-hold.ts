@@ -1,6 +1,6 @@
 import "server-only";
 import type Stripe from "stripe";
-import { getStripeBookingAdmin, getStripeTestClient } from "@/lib/stripe/server";
+import { assertStripeRecordScope, getStripeBookingAdmin, getVerifiedStripeContext, getStripeConfig } from "@/lib/stripe/server";
 import { rpcError } from "@/lib/stripe/errors";
 import { expirationReconciliationFilter, expirationReconciliationPolicy } from "@/lib/stripe/expiration-reconciliation-policy";
 
@@ -8,25 +8,37 @@ const MAX_RECONCILIATION_PAGES = 3;
 const CREATION_LEASE_MS = 2 * 60_000;
 
 export async function expireStripeBookingHold(bookingId: string, expectedAttemptId?: string, now = Date.now()) {
+  const config = getStripeConfig();
   const db = getStripeBookingAdmin();
   const { data: booking, error } = await db.from("bookings")
-    .select("id,payment_flow,payment_status,status,payment_expires_at,finalization_status,stripe_expiration_last_attempt_at,stripe_expiration_reconciled_at")
+    .select("id,stripe_mode,stripe_account_id,stripe_site_origin,payment_flow,payment_status,status,payment_expires_at,finalization_status,stripe_expiration_last_attempt_at,stripe_expiration_reconciled_at")
     .eq("id", bookingId).maybeSingle();
   rpcError(error);
   if (!booking || booking.payment_flow !== "stripe" || booking.payment_status !== "pending" ||
       !["pending", "cancelled"].includes(booking.status) || booking.finalization_status === "review_required" ||
       booking.stripe_expiration_reconciled_at !== null) return false;
+  try { assertStripeRecordScope(booking, config); } catch { return false; }
   const policy = expirationReconciliationPolicy(booking.payment_expires_at, booking.stripe_expiration_last_attempt_at, now);
   if (!policy.due) return false;
-  const { data: attempt, error: attemptError } = await db.from("booking_payment_attempts")
-    .select("*").eq("booking_id", bookingId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  rpcError(attemptError);
+  // Timestamp ties are possible when rejection and successor commit together.
+  // The partial unique index makes the active attempt authoritative regardless
+  // of timestamps; only fall back to a deterministic terminal-attempt order.
+  const active = await db.from("booking_payment_attempts").select("*").eq("booking_id", bookingId)
+    .in("status", ["creating", "unknown", "open"]).maybeSingle();
+  rpcError(active.error);
+  const latest = active.data ? active : await db.from("booking_payment_attempts")
+    .select("*").eq("booking_id", bookingId).order("created_at", { ascending: false })
+    .order("id", { ascending: false }).limit(1).maybeSingle();
+  rpcError(latest.error);
+  const attempt = latest.data;
+  if (attempt) { try { assertStripeRecordScope(attempt, config); } catch { return false; } }
   if (expectedAttemptId && attempt?.id !== expectedAttemptId) return false;
   // Claim this eligible pass with a compare-and-set on the persisted timestamp.
   // Another worker, webhook, paid booking or completed reconciliation wins safely.
   const stamp = new Date(now).toISOString();
   let auditQuery = db.from("bookings").update({ stripe_expiration_last_attempt_at: stamp })
-    .eq("id", bookingId).eq("payment_flow", "stripe").eq("payment_status", "pending")
+    .eq("id", bookingId).eq("stripe_mode", config.mode).eq("stripe_account_id", config.accountId)
+    .eq("payment_flow", "stripe").eq("payment_status", "pending")
     .in("status", ["pending", "cancelled"]).neq("finalization_status", "review_required")
     .is("stripe_expiration_reconciled_at", null).lte("payment_expires_at", stamp);
   auditQuery = booking.stripe_expiration_last_attempt_at === null
@@ -37,8 +49,11 @@ export async function expireStripeBookingHold(bookingId: string, expectedAttempt
   if (!audit.data) return false;
   let remoteExpired = false;
   try {
-    if (attempt) {
-      const stripe = getStripeTestClient();
+    if (attempt && attempt.status === "failed" && attempt.checkout_creation_state === "rejected" &&
+        !attempt.stripe_checkout_session_id && !attempt.stripe_payment_intent_id && !attempt.payment_received_at) {
+      remoteExpired = true; // Proven rejected creation is not a lost Stripe response.
+    } else if (attempt) {
+      const { stripe } = await getVerifiedStripeContext();
       let session: Stripe.Checkout.Session | null = attempt.stripe_checkout_session_id
         ? await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_session_id) : null;
       if (!session) {
@@ -69,14 +84,15 @@ export async function expireStripeBookingHold(bookingId: string, expectedAttempt
       }
       if (session) {
         const intentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
-        if (session.livemode || session.mode !== "payment" || session.client_reference_id !== bookingId ||
+        if (session.livemode !== (config.mode === "live") || session.mode !== "payment" || session.client_reference_id !== bookingId ||
             session.metadata?.booking_id !== bookingId || session.metadata?.payment_attempt_id !== attempt.id ||
+            session.metadata?.stripe_mode !== config.mode || session.metadata?.stripe_account_id !== config.accountId ||
             (attempt.stripe_payment_intent_id && intentId !== attempt.stripe_payment_intent_id) ||
             BigInt(session.amount_total ?? -1) !== BigInt(attempt.amount_minor) || session.currency !== attempt.currency) throw new Error("reconciliation_identity_mismatch");
         if (!attempt.stripe_checkout_session_id) {
           const { error: bindError } = await db.from("booking_payment_attempts")
             .update({ stripe_checkout_session_id: session.id, stripe_expires_at: new Date(session.expires_at * 1000).toISOString() })
-            .eq("id", attempt.id).is("stripe_checkout_session_id", null);
+            .eq("id", attempt.id).eq("stripe_mode", config.mode).eq("stripe_account_id", config.accountId).is("stripe_checkout_session_id", null);
           rpcError(bindError);
         }
         if (session.status === "open") session = await stripe.checkout.sessions.expire(session.id);
@@ -94,8 +110,9 @@ export async function expireStripeBookingHold(bookingId: string, expectedAttempt
     (attempt.status !== "unknown" || attempt.last_error !== "expiration_requires_reconciliation");
   let changed = false;
   if (booking.status === "pending" || remoteExpired || !attempt || attemptNeedsChange) {
-    const result = await db.rpc("expire_stripe_booking_hold_v1", {
+    const result = await db.rpc("expire_stripe_booking_hold_v2", {
       p_booking_id: bookingId, p_attempt_id: attempt?.id ?? null, p_remote_expired: remoteExpired,
+      p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
     });
     rpcError(result.error);
     changed = Boolean(result.data);
@@ -106,7 +123,8 @@ export async function expireStripeBookingHold(bookingId: string, expectedAttempt
     const review = await db.from("bookings").update({
       finalization_status: "review_required", finalization_error: "expiration_reconciliation_review_required",
       next_finalization_at: null,
-    }).eq("id", bookingId).eq("payment_flow", "stripe").eq("payment_status", "pending")
+    }).eq("id", bookingId).eq("stripe_mode", config.mode).eq("stripe_account_id", config.accountId)
+    .eq("payment_flow", "stripe").eq("payment_status", "pending")
       .in("status", ["pending", "cancelled"]).neq("finalization_status", "review_required")
       .is("stripe_expiration_reconciled_at", null).eq("stripe_expiration_last_attempt_at", stamp)
       .select("id").maybeSingle();
@@ -116,16 +134,24 @@ export async function expireStripeBookingHold(bookingId: string, expectedAttempt
   return changed;
 }
 
-export async function expireDueStripeHolds(now = Date.now()) {
+export async function expireDueStripeHolds(now = Date.now(), options: { limit?: number; deadline?: number } = {}) {
+  const config = getStripeConfig();
   const db = getStripeBookingAdmin();
   const { data, error } = await db.from("bookings").select("id")
+    .eq("stripe_mode", config.mode).eq("stripe_account_id", config.accountId)
     .eq("payment_flow", "stripe").eq("payment_status", "pending")
     .is("stripe_expiration_reconciled_at", null)
     .neq("finalization_status", "review_required")
     .in("status", ["pending", "cancelled"]).lte("payment_expires_at", new Date(now).toISOString())
     .or(expirationReconciliationFilter(now))
     .order("stripe_expiration_last_attempt_at", { ascending: true, nullsFirst: true })
-    .order("payment_expires_at").limit(10);
+    .order("payment_expires_at").limit(options.limit ?? 10);
   rpcError(error);
-  for (const booking of data ?? []) await expireStripeBookingHold(booking.id, undefined, now);
+  let processed = 0, deferred = 0;
+  for (const booking of data ?? []) {
+    if (Date.now() >= (options.deadline ?? Infinity)) break;
+    try { await expireStripeBookingHold(booking.id, undefined, now); processed++; }
+    catch { deferred++; console.error("Stripe expiration remains queued", { bookingId: booking.id }); }
+  }
+  return { processed, deferred };
 }

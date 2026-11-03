@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripeBookingAdmin, getStripeTestClient, getStripeTestSiteUrl } from "@/lib/stripe/server";
+import { assertStripeCatalogReady, assertStripeSalesReady, getStripeBookingAdmin, getStripeConfig, getVerifiedStripeContext,
+  verifyImmediatePaymentMethods } from "@/lib/stripe/server";
+import { createDurableProcessAccess } from "@/lib/coaching/process-access";
 import { bookingAccessCookie, bookingFlowCookie, createBookingAccess, holdCookieOptions,
   bookingConfirmationGraceMs, hashBookingAccess, hasBookingAccess, isBookingId } from "@/lib/stripe/access";
 import { publicStripeError, rpcError, StripeBookingError } from "@/lib/stripe/errors";
 import { createOrRecoverCheckout } from "@/lib/stripe/checkout";
-import { expireDueStripeHolds } from "@/lib/stripe/expire-hold";
 import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 import { hasCurrentBookingAcceptance, hasDurableCurrentBookingAcceptance } from "@/lib/legal/acceptance";
 import { reconcileStripeCheckoutReturn } from "@/lib/stripe/checkout-return";
@@ -25,8 +26,8 @@ export async function POST(request: NextRequest) {
     return response;
   };
   try {
-    site = getStripeTestSiteUrl();
-    getStripeTestClient();
+    const config = getStripeConfig();
+    site = config.siteUrl;
     if (request.headers.get("origin") !== site) throw new StripeBookingError("invalid_access");
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new StripeBookingError("invalid_request");
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest) {
         if (acceptance.data !== true) throw new StripeBookingError("invalid_access");
       }
     } else {
+      assertStripeSalesReady(config);
       const allowed = ["service", "startsAt", "name", "email", "phone", "notes", "flowId", "legalAcceptance"];
       if (Object.keys(body).some((key) => !allowed.includes(key)) ||
           !isBookingId(body.flowId) || typeof body.service !== "string" || !body.service.trim() ||
@@ -90,6 +92,11 @@ export async function POST(request: NextRequest) {
           (body.notes != null && (typeof body.notes !== "string" || body.notes.length > 2000))) {
         throw new StripeBookingError("invalid_request");
       }
+      const context = await getVerifiedStripeContext({ forNewSale: true });
+      await verifyImmediatePaymentMethods(context.stripe, config);
+      const catalog = await assertStripeCatalogReady(db);
+      const service = catalog.find((item) => item.slug === body.service.trim());
+      if (!service) throw new StripeBookingError("service_unavailable");
       token = request.cookies.get(bookingFlowCookie(body.flowId))?.value;
       if (!token) {
         // Bootstrap before creating a hold. JavaScript receives only a flag;
@@ -102,15 +109,19 @@ export async function POST(request: NextRequest) {
         return response;
       }
       const hash = hashBookingAccess(token);
-      // Cleanup targets explicitly identified Stripe holds only. The database
-      // exclusion constraint remains the final authority when requests race.
-      await expireDueStripeHolds();
-      const result = await db.rpc("create_stripe_booking_hold_with_legal_v1", {
+      // Expiration/reconciliation belongs to the bounded worker. A new sale
+      // never waits for an unrelated Stripe network batch. The exclusion
+      // constraint remains the final authority when requests race.
+      const processAccess = service.service_type === "package" ? createDurableProcessAccess() : null;
+      const result = await db.rpc("create_stripe_booking_hold_with_legal_v2", {
         p_service_slug: body.service.trim(), p_starts_at: body.startsAt.trim(),
         p_customer_name: body.name.trim(), p_customer_email: body.email.trim().toLowerCase(),
         p_customer_phone: body.phone?.trim() || null, p_notes: body.notes?.trim() || null,
         p_access_token_hash: hash,
         p_legal_acceptance: body.legalAcceptance,
+        p_stripe_mode: config.mode, p_stripe_account_id: config.accountId, p_site_url: site,
+        p_process_access_token_hash: processAccess?.tokenHash ?? null,
+        p_process_access_token_encrypted: processAccess?.tokenEncrypted ?? null,
       });
       rpcError(result.error);
       if (!isBookingId(result.data?.booking_id)) throw new StripeBookingError("checkout_unavailable");

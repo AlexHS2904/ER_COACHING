@@ -1,22 +1,26 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
-import { getStripeBookingAdmin, getStripeTestClient, getStripeTestSiteUrl } from "@/lib/stripe/server";
+import { assertStripeRecordScope, getStripeBookingAdmin, getVerifiedStripeContext, verifyImmediatePaymentMethods } from "@/lib/stripe/server";
 import { rpcError, StripeBookingError } from "@/lib/stripe/errors";
 import { toStripeMinorUnits } from "@/lib/stripe/money";
 import { expireStripeBookingHold } from "@/lib/stripe/expire-hold";
 import { classifyCheckoutCreationError } from "@/lib/stripe/checkout-creation-error";
 
 export async function createOrRecoverCheckout(bookingId: string, accessHash: string) {
-  const stripe = getStripeTestClient();
+  const { config, stripe } = await getVerifiedStripeContext();
+  await verifyImmediatePaymentMethods(stripe, config);
   const db = getStripeBookingAdmin();
   const owner = randomUUID();
-  const { data, error } = await db.rpc("claim_stripe_checkout_v1", {
+  const { data, error } = await db.rpc("claim_stripe_checkout_v2", {
     p_booking_id: bookingId, p_access_token_hash: accessHash, p_owner: owner,
-    p_site_url: getStripeTestSiteUrl(),
+    p_site_url: config.siteUrl, p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
+    p_payment_method_configuration_id: config.paymentMethodConfigurationId,
   });
   rpcError(error);
   const { booking, attempt } = data;
+  assertStripeRecordScope(booking, config);
+  assertStripeRecordScope(attempt, config);
   const amount = toStripeMinorUnits(String(booking.price_snapshot), booking.currency_snapshot);
   if (BigInt(attempt.amount_minor) !== BigInt(amount)) throw new StripeBookingError("review_required");
   let session: Stripe.Checkout.Session;
@@ -24,10 +28,14 @@ export async function createOrRecoverCheckout(bookingId: string, accessHash: str
   // selects Dynamic Payment Methods from Dashboard. Keep stored retries intact.
   const checkoutPayload = { ...attempt.checkout_payload };
   delete checkoutPayload.payment_method_types;
+  if (checkoutPayload.payment_method_configuration !== config.paymentMethodConfigurationId ||
+      checkoutPayload.metadata?.stripe_mode !== config.mode ||
+      checkoutPayload.metadata?.stripe_account_id !== config.accountId) throw new StripeBookingError("review_required");
   const recordFailure = async (result: ReturnType<typeof classifyCheckoutCreationError>) => {
-    const recorded = await db.rpc("record_stripe_checkout_failure_v1", {
+    const recorded = await db.rpc("record_stripe_checkout_failure_v2", {
       p_booking_id: booking.id, p_attempt_id: attempt.id, p_owner: owner,
       p_status: result.status, p_error: result.last_error,
+      p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
     });
     // A stale lease or an already bound Session is a safe no-op. Database errors
     // must not be mistaken for a recorded rejection: dispatch remains ambiguous.
@@ -42,8 +50,9 @@ export async function createOrRecoverCheckout(bookingId: string, accessHash: str
       throw new StripeBookingError("checkout_unavailable");
     }
   } else {
-    const dispatch = await db.rpc("begin_stripe_checkout_creation_v1", {
+    const dispatch = await db.rpc("begin_stripe_checkout_creation_v2", {
       p_booking_id: booking.id, p_attempt_id: attempt.id, p_owner: owner,
+      p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
     });
     rpcError(dispatch.error);
     if (typeof dispatch.data !== "boolean") throw new StripeBookingError("checkout_unavailable");
@@ -68,7 +77,10 @@ export async function createOrRecoverCheckout(bookingId: string, accessHash: str
       stripe.off("request", onRequest);
     }
   }
-  const matches = !session.livemode && session.mode === "payment" &&
+  const matches = session.livemode === (config.mode === "live") && session.mode === "payment" &&
+    session.metadata?.stripe_mode === config.mode && session.metadata?.stripe_account_id === config.accountId &&
+    Array.isArray(session.payment_method_types) && session.payment_method_types.length > 0 &&
+    session.payment_method_types.every((method) => ["card", "link"].includes(method)) &&
     session.client_reference_id === booking.id &&
     session.metadata?.booking_id === booking.id &&
     session.metadata?.payment_attempt_id === attempt.id &&
@@ -83,8 +95,9 @@ export async function createOrRecoverCheckout(bookingId: string, accessHash: str
   }
   let saved;
   try {
-    saved = await db.rpc("save_stripe_checkout_v1", {
+    saved = await db.rpc("save_stripe_checkout_v2", {
       p_booking_id: booking.id, p_attempt_id: attempt.id, p_owner: owner,
+      p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
       p_session_id: session.id, p_expires_at: new Date(session.expires_at * 1000).toISOString(),
     });
     rpcError(saved.error);

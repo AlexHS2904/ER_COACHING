@@ -296,6 +296,7 @@ async function validateAccess(
   const {
     form,
     booking,
+    processEntitlementActive,
   } = result;
 
   /* =====================================================
@@ -363,8 +364,8 @@ async function validateAccess(
     }
 
     if (
-      booking.status ===
-      "cancelled"
+      (booking.status === "cancelled" && !processEntitlementActive) ||
+      (form.process_id && !processEntitlementActive)
     ) {
       return {
         error:

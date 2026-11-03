@@ -8,6 +8,7 @@ import {
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { sendIntakeFormReadyEmail } from "@/lib/email/send-intake-form-ready-email";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import type { StripeRuntimeScope } from "@/lib/stripe/server";
 
 type Params = {
   bookingId: string;
@@ -15,6 +16,9 @@ type Params = {
   paymentReference?: string | null;
   siteUrl: string;
   sendReadyEmail?: boolean;
+  stripeScope?: StripeRuntimeScope;
+  processId?: string | null;
+  allowUnavailableProcessIntake?: boolean;
 };
 
 type Activation = {
@@ -35,10 +39,14 @@ export async function activateBookingIntake({
   paymentReference = null,
   siteUrl,
   sendReadyEmail = true,
+  stripeScope,
+  processId = null,
+  allowUnavailableProcessIntake = false,
 }: Params) {
   const supabase = getSupabaseAdmin();
   const existing = await supabase.from("booking_intake_forms")
-    .select("access_token_hash,access_token_encrypted").eq("booking_id", bookingId).maybeSingle();
+    .select("access_token_hash,access_token_encrypted")
+    .eq(processId ? "process_id" : "booking_id", processId ?? bookingId).maybeSingle();
   if (existing.error) throw new Error("No fue posible recuperar el acceso al formulario.");
   let tokenHash = existing.data?.access_token_hash;
   let encryptedToken = existing.data?.access_token_encrypted;
@@ -52,16 +60,17 @@ export async function activateBookingIntake({
 
   // PostgreSQL chooses the winning access under the booking lock, including
   // concurrent first-call proposals. Always use the access returned by the RPC.
-  const { data, error } = await supabase.rpc("activate_booking_intake_v2", {
+  const rpc = stripeScope ? "activate_stripe_intake_v1" : "activate_booking_intake_v2";
+  const { data, error } = await supabase.rpc(rpc, {
     p_booking_id: bookingId,
     p_access_token_hash: tokenHash,
     p_access_token_encrypted: encryptedToken,
-    p_payment_provider: provider,
-    p_payment_reference: paymentReference,
+    ...(stripeScope ? { p_stripe_mode: stripeScope.mode, p_stripe_account_id: stripeScope.accountId }
+      : { p_payment_provider: provider, p_payment_reference: paymentReference }),
   });
 
   if (error) {
-    console.error("activate_booking_intake_v2 failed", { bookingId });
+    console.error("Booking intake activation failed", { bookingId });
     throw new Error("No fue posible activar el formulario.");
   }
 
@@ -76,7 +85,11 @@ export async function activateBookingIntake({
   const submitted = form.data.status === "submitted" && Boolean(form.data.submitted_at);
   const accessible = form.data.status === "active" && !form.data.submitted_at &&
     Date.parse(form.data.expires_at) > Date.now();
-  if (!submitted && !accessible) {
+  // The existing 30-day form access policy is not an expiry of a purchased
+  // package. Later covered sessions keep their entitlement; a closed form is
+  // never reopened, replaced or delivered in a new CTA.
+  const unavailableProcessForm = Boolean(processId && allowUnavailableProcessIntake && !submitted && !accessible);
+  if (!submitted && !accessible && !unavailableProcessForm) {
     throw new Error("El formulario requiere revisión administrativa; no se generó un acceso de reemplazo.");
   }
 
@@ -85,7 +98,7 @@ export async function activateBookingIntake({
     // Submission changes redirect eligibility, never the identity of an email
     // already accepted by the provider. Recover the same stored token in both
     // states, including a finalization retry after an ambiguous email result.
-    if (!submitted || activation.access_token_encrypted) {
+    if (!unavailableProcessForm && (!submitted || activation.access_token_encrypted)) {
       canonicalIntakeUrl = storedIntakeUrl(activation, siteUrl);
     }
   } catch {
@@ -150,7 +163,7 @@ export async function activateBookingIntake({
   return {
     success: true,
     formId: activation.form_id,
-    intakeStatus: form.data.status as "active" | "submitted",
+    intakeStatus: form.data.status as "active" | "submitted" | "expired" | "revoked",
     submittedAt: form.data.submitted_at as string | null,
     canonicalIntakeUrl,
     // Internal server result. Public callers must also validate booking access;

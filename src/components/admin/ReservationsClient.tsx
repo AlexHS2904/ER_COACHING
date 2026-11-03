@@ -3,6 +3,8 @@
 import BookingPaymentPanel from "@/components/admin/BookingPaymentPanel";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { LEGAL_TERMS_VERSION } from "@/lib/legal/documents";
 
 import CancelBookingButton from "@/components/admin/CancelBookingButton";
 
@@ -10,6 +12,12 @@ import RescheduleBookingButton from "@/components/admin/RescheduleBookingButton"
 
 type Booking = {
   id: string;
+  process_id?: string | null;
+  stripe_mode?: string | null;
+  legal_terms_version?: string | null;
+  session_resolution?: string | null;
+  session_resolution_at?: string | null;
+  finalization_status?: string | null;
   booking_reference: string | null;
   payment_status: string;
 
@@ -385,6 +393,22 @@ function translateEmailStatus(
 export default function ReservationsClient({
   bookings,
 }: ReservationsClientProps) {
+  const router = useRouter();
+  const [resolutionBusy, setResolutionBusy] = useState(false);
+  const [resolutionError, setResolutionError] = useState("");
+  async function resolveSession(action: "no_show" | "approve_replacement" | "consume") {
+    if (!selectedBooking || resolutionBusy || !window.confirm("¿Confirmas esta decisión sobre la sesión?")) return;
+    setResolutionBusy(true); setResolutionError("");
+    try {
+      const response = await fetch(`/api/bookings/${encodeURIComponent(selectedBooking.id)}/cancel`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "No fue posible guardar la decisión.");
+      setSelectedBooking(null); router.refresh();
+    } catch (error) { setResolutionError(error instanceof Error ? error.message : "No fue posible guardar la decisión."); }
+    finally { setResolutionBusy(false); }
+  }
   const [
     activeFilter,
     setActiveFilter,
@@ -1540,6 +1564,32 @@ export default function ReservationsClient({
 
             {/* GESTIÓN */}
 
+            {selectedBooking.stripe_mode && selectedBooking.legal_terms_version === LEGAL_TERMS_VERSION && (
+              <div className="mt-6 space-y-3 border-t border-brand-taupe/20 pt-5 text-sm">
+                {selectedBooking.session_resolution && <p>
+                  Resolución: {{ late_cancel_pending: "Cancelación tardía en revisión; derecho reservado",
+                    replacement_approved: "Reposición autorizada", consumed: "Sesión utilizada",
+                    replacement_scheduled: "Reposición agendada sobre la misma reserva",
+                    no_show: "Inasistencia sin aviso; sesión utilizada" }[selectedBooking.session_resolution] ?? selectedBooking.session_resolution}.
+                </p>}
+                {selectedBooking.status === "confirmed" && selectedBooking.finalization_status === "completed" &&
+                  selectedBooking.session_resolution !== "late_cancel_pending" && Date.parse(selectedBooking.starts_at) <= Date.now() && (
+                  <button type="button" disabled={resolutionBusy} onClick={() => resolveSession("no_show")}
+                    className="rounded-full border border-brand-taupe px-4 py-3">Marcar inasistencia sin aviso</button>
+                )}
+                {["late_cancel_pending", "no_show"].includes(selectedBooking.session_resolution ?? "") && (
+                  <div className="flex flex-wrap gap-3">
+                    <button type="button" disabled={resolutionBusy} onClick={() => resolveSession("approve_replacement")}
+                      className="rounded-full border border-brand-taupe px-4 py-3">Autorizar reposición</button>
+                    {selectedBooking.session_resolution === "late_cancel_pending" && (
+                      <button type="button" disabled={resolutionBusy} onClick={() => resolveSession("consume")}
+                        className="rounded-full border border-brand-taupe px-4 py-3">Resolver como utilizada</button>
+                    )}
+                  </div>
+                )}
+                {resolutionError && <p role="alert">{resolutionError}</p>}
+              </div>
+            )}
             {[
               "pending",
               "confirmed",

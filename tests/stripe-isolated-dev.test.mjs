@@ -4,8 +4,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, exist
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { copySource, assertNoEnvFiles, required } from '../scripts/dev-stripe-test.mjs';
+import { copySource, assertNoEnvFiles, required, assertIsolatedTestConfiguration } from '../scripts/dev-stripe-test.mjs';
 import { testModules } from './helpers/load-typescript.mjs';
+import { prepareBuildSource } from '../scripts/build-stripe-test.mjs';
 
 test('isolated environment supplies the existing Intake submission recipient to the real email helper',async()=>{
   const config={RESEND_FROM_EMAIL:'sender@example.test',COACH_EMAIL:'booking-coach@example.test',CONTACT_TO_EMAIL:'intake-coach@example.test'};
@@ -47,4 +48,44 @@ test('isolated source excludes env files at every depth and source symlinks',()=
     assert.equal(existsSync(join(target,'linked-secret')),false);
     assert.equal(existsSync(join(target,'nested','safe.ts')),true);
   } finally { rmSync(root,{recursive:true,force:true}); }
+});
+
+test('sanitized build excludes every nested env and both file and directory source symlinks',()=>{
+  const root=mkdtempSync(join(tmpdir(),'isolation-build-test-'));
+  try {
+    const source=join(root,'source'),target=join(root,'target'),outside=join(root,'outside');
+    mkdirSync(join(source,'src','nested'),{recursive:true});mkdirSync(outside);
+    writeFileSync(join(source,'.env.local'),'SYNTHETIC_ONLY=forbidden');
+    writeFileSync(join(source,'src','.env.production'),'SYNTHETIC_ONLY=forbidden');
+    writeFileSync(join(source,'src','nested','.env.stripe-test'),'SYNTHETIC_ONLY=forbidden');
+    writeFileSync(join(source,'src','nested','safe.ts'),'export {};');
+    writeFileSync(join(outside,'private.txt'),'SYNTHETIC_ONLY=forbidden');
+    symlinkSync(join(source,'.env.local'),join(source,'src','linked-file'));
+    symlinkSync(outside,join(source,'src','linked-directory'),'dir');
+    prepareBuildSource(source,target);assertNoEnvFiles(target);
+    for(const relative of ['.env.local','src/.env.production','src/nested/.env.stripe-test','src/linked-file','src/linked-directory']) {
+      assert.equal(existsSync(join(target,relative)),false,relative);
+    }
+    assert.equal(readFileSync(join(target,'src','nested','safe.ts'),'utf8'),'export {};');
+    // Detecting an unexpected artifact aborts before the build can start.
+    writeFileSync(join(target,'src','nested','.env.unexpected'),'SYNTHETIC_ONLY=forbidden');
+    assert.throws(()=>assertNoEnvFiles(target),/Unsafe isolated source tree/);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('isolated launcher accepts only explicit Test credentials and isolated databases',()=>{
+  const config={STRIPE_MODE:'test',STRIPE_EXPECTED_ACCOUNT_ID:'acct_fixture',STRIPE_PAYMENT_METHOD_CONFIGURATION_ID:'pmc_fixture',
+    PAID_BOOKINGS_ENABLED:'true',STRIPE_SECRET_KEY:'sk_test_fixture_only',STRIPE_WEBHOOK_SECRET:'whsec_fixture_only',
+    NEXT_PUBLIC_SITE_URL:'http://localhost:3000',NEXT_PUBLIC_SUPABASE_URL:'http://127.0.0.1:54321',
+    STRIPE_LOCAL_WORKER_SECRET:'s'.repeat(32),INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')};
+  assert.doesNotThrow(()=>assertIsolatedTestConfiguration(config));
+  assert.doesNotThrow(()=>assertIsolatedTestConfiguration({...config,PAID_BOOKINGS_ENABLED:'false',
+    NEXT_PUBLIC_SUPABASE_URL:'https://abcdefghijklmnopqrst.supabase.co',STRIPE_TEST_SUPABASE_PROJECT_REF:'abcdefghijklmnopqrst'}));
+  for(const change of [{STRIPE_MODE:'live'},{STRIPE_SECRET_KEY:'sk_live_fixture_only'},
+    {NEXT_PUBLIC_SUPABASE_URL:'https://rysgpojjhiljrrwtjguy.supabase.co',STRIPE_TEST_SUPABASE_PROJECT_REF:'rysgpojjhiljrrwtjguy'},
+    {NEXT_PUBLIC_SUPABASE_URL:'https://abcdefghijklmnopqrst.supabase.co'},
+    {NEXT_PUBLIC_SITE_URL:'https://www.ednarojocoaching.com'},
+    {NEXT_PUBLIC_SUPABASE_URL:'http://user:password@localhost:54321'},
+    {STRIPE_EXPECTED_ACCOUNT_ID:''},{STRIPE_PAYMENT_METHOD_CONFIGURATION_ID:''},{PAID_BOOKINGS_ENABLED:'yes'},
+    {STRIPE_E2E_FORCE_CREATE_FAILURE:'once'}]) assert.throws(()=>assertIsolatedTestConfiguration({...config,...change}));
 });

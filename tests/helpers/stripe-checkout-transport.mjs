@@ -27,7 +27,7 @@ export function stripeCheckoutTransport({rejectFirstCreate=false}={}) {
         const form=new URLSearchParams(body),metadata={};
         for(const [name,value] of form)if(name.startsWith('metadata['))metadata[name.slice(9,-1)]=value;
         const session={id:`cs_test_${randomUUID().replaceAll('-','')}`,object:'checkout.session',livemode:false,
-          mode:form.get('mode'),status:'open',payment_status:'unpaid',metadata,
+          payment_method_types:['card'],mode:form.get('mode'),status:'open',payment_status:'unpaid',metadata,
           client_reference_id:form.get('client_reference_id'),
           amount_total:Number(form.get('line_items[0][price_data][unit_amount]')),
           currency:form.get('line_items[0][price_data][currency]'),expires_at:Number(form.get('expires_at')),

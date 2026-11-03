@@ -1,6 +1,6 @@
 import "server-only";
 import { after, NextRequest, NextResponse } from "next/server";
-import { getStripeTestClient } from "@/lib/stripe/server";
+import { getStripeClient, getStripeConfig } from "@/lib/stripe/server";
 import { applyStripeCheckoutEvent } from "@/lib/stripe/webhook";
 import { finalizePaidBooking } from "@/lib/bookings/finalize-paid-booking";
 
@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   let stripe;
-  try { stripe = getStripeTestClient(); } catch {
-    return NextResponse.json({ error: "Stripe Test Mode no está configurado." }, { status: 503 });
+  try { stripe = getStripeClient(); } catch {
+    return NextResponse.json({ error: "El servicio de pagos no está disponible." }, { status: 503 });
   }
   const signature = request.headers.get("stripe-signature");
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -17,7 +17,8 @@ export async function POST(request: NextRequest) {
   let event;
   try {
     event = stripe.webhooks.constructEvent(await request.text(), signature, secret);
-    if (event.livemode) throw new Error("live_event_rejected");
+    const config = getStripeConfig();
+    if (event.livemode !== (config.mode === "live") || (event.account && event.account !== config.accountId)) throw new Error("stripe_event_scope_mismatch");
   } catch {
     return NextResponse.json({ error: "Firma o evento no válido." }, { status: 400 });
   }

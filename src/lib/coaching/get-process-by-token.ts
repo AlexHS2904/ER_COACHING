@@ -7,9 +7,12 @@ import {
 import {
   getSupabaseAdmin,
 } from "@/lib/supabase/admin";
+import { hasVerifiedProcessPurchase, isProcessWithinValidity, type ProcessPurchase } from "@/lib/coaching/process-entitlement";
 
 export type ProcessBooking = {
   id: string;
+  session_resolution: string | null;
+  replaces_booking_id: string | null;
 
   booking_reference:
     | string
@@ -35,6 +38,7 @@ export type ProcessBooking = {
 
 export type CoachingProcess = {
   id: string;
+  expires_at: string | null;
 
   process_reference:
     string;
@@ -68,6 +72,10 @@ export type CoachingProcess = {
 
   created_at:
     string;
+
+  purchase_booking_id: string | null;
+  stripe_mode: string | null;
+  stripe_account_id: string | null;
 };
 
 export type ProcessAccessData = {
@@ -82,6 +90,8 @@ export type ProcessAccessData = {
 
   timezone:
     string;
+
+  canSchedule: boolean;
 };
 
 export async function getProcessByToken(
@@ -131,7 +141,11 @@ export async function getProcessByToken(
         total_sessions,
 
         status,
-        created_at
+        created_at,
+        purchase_booking_id,
+        stripe_mode,
+        stripe_account_id
+        ,expires_at
       `,
     )
     .eq(
@@ -143,7 +157,7 @@ export async function getProcessByToken(
   if (processError) {
     console.error(
       "Error reading coaching process:",
-      processError,
+      { code: processError.code },
     );
 
     throw new Error(
@@ -154,6 +168,14 @@ export async function getProcessByToken(
   if (!process) {
     return null;
   }
+
+  const purchase = process.purchase_booking_id ? await supabase.from("bookings")
+    .select("id,process_id,package_session_number,payment_status,payment_provider,payment_flow,payment_reference,paid_at,stripe_mode,stripe_account_id")
+    .eq("id", process.purchase_booking_id).maybeSingle() : { data: null, error: null };
+  if (purchase.error) throw new Error("No fue posible consultar el proceso de coaching.");
+  const paid = hasVerifiedProcessPurchase(process, purchase.data as ProcessPurchase | null);
+  // A new unpaid purchase has no usable portal. Legacy private history remains readable.
+  if (process.stripe_mode && !paid) return null;
 
   /* =======================================================
      SERVICIO
@@ -179,7 +201,7 @@ export async function getProcessByToken(
   ) {
     console.error(
       "Error reading process service:",
-      serviceError,
+      { code: serviceError?.code },
     );
 
     throw new Error(
@@ -201,6 +223,8 @@ export async function getProcessByToken(
         id,
         booking_reference,
         package_session_number,
+        session_resolution,
+        replaces_booking_id,
 
         starts_at,
         ends_at,
@@ -231,7 +255,7 @@ export async function getProcessByToken(
   if (bookingsError) {
     console.error(
       "Error reading process bookings:",
-      bookingsError,
+      { code: bookingsError.code },
     );
 
     throw new Error(
@@ -270,5 +294,7 @@ export async function getProcessByToken(
     timezone:
       settings?.timezone ??
       "America/Mexico_City",
+
+    canSchedule: paid && process.status === "active" && isProcessWithinValidity(process.expires_at),
   };
 }

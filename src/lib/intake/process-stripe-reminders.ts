@@ -1,13 +1,15 @@
 import "server-only";
-import { getStripeBookingAdmin, getStripeTestSiteUrl } from "@/lib/stripe/server";
+import { getStripeBookingAdmin, getStripeConfig } from "@/lib/stripe/server";
 import { storedIntakeUrl } from "@/lib/intake/stored-intake-url";
 import { sendIntakeFormReadyEmail } from "@/lib/email/send-intake-form-ready-email";
 
-export async function processStripeIntakeReminders() {
+export async function processStripeIntakeReminders(options: { limit?: number; deadline?: number } = {}) {
   const db = getStripeBookingAdmin();
+  const config = getStripeConfig();
+  const scope = { p_stripe_mode: config.mode, p_stripe_account_id: config.accountId };
   let sent = 0;
-  for (let i = 0; i < 10; i++) {
-    const claim = await db.rpc("claim_stripe_intake_reminder_v1", {});
+  for (let i = 0; i < (options.limit ?? 10) && Date.now() < (options.deadline ?? Infinity); i++) {
+    const claim = await db.rpc("claim_stripe_intake_reminder_v2", scope);
     if (claim.error) throw new Error("intake_reminder_claim_failed");
     const form = claim.data;
     if (!form) break;
@@ -18,7 +20,7 @@ export async function processStripeIntakeReminders() {
     try {
       payload = {
         formId: form.form_id, customerName: form.customer_name, customerEmail: form.customer_email,
-        serviceName: form.service_name, formUrl: storedIntakeUrl(form, getStripeTestSiteUrl()),
+        serviceName: form.service_name, formUrl: storedIntakeUrl(form, form.stripe_site_origin),
       };
     } catch {
       const saved = await db.from("booking_intake_forms")
@@ -31,9 +33,10 @@ export async function processStripeIntakeReminders() {
 
     // PostgreSQL revalidates and locks both rows, including the exact observed
     // starts_at, and records potential dispatch BEFORE any Resend call.
-    const dispatch = await db.rpc("mark_stripe_intake_reminder_dispatch_started_v1", {
+    const dispatch = await db.rpc("mark_stripe_intake_reminder_dispatch_started_v2", {
       p_booking_id: form.booking_id, p_form_id: form.form_id,
       p_claim_started_at: form.claim_started_at, p_expected_starts_at: form.expected_starts_at,
+      ...scope,
     });
     if (dispatch.error || typeof dispatch.data !== "boolean") {
       // A response may have been lost after COMMIT. Do not release, overwrite
@@ -41,8 +44,9 @@ export async function processStripeIntakeReminders() {
       throw new Error("intake_reminder_dispatch_requires_review");
     }
     if (!dispatch.data) {
-      const released = await db.rpc("release_unstarted_stripe_intake_reminder_v1", {
+      const released = await db.rpc("release_unstarted_stripe_intake_reminder_v2", {
         p_booking_id: form.booking_id, p_claim_started_at: form.claim_started_at,
+        ...scope,
       });
       if (released.error) throw new Error("intake_reminder_release_requires_review");
       // If another dispatcher won, release itself rejects the later phase.

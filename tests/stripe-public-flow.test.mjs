@@ -1,3 +1,4 @@
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -10,9 +11,9 @@ const id="11111111-1111-4111-8111-111111111111",site="http://localhost:3000",tok
 const flowId="22222222-2222-4222-8222-222222222222";
 const hash=testModules().load("src/lib/stripe/access.ts").hashBookingAccess(token);
 const fakeResponse={json:(data,init={})=>{const saved=[];return {data,status:init.status??200,cookies:{saved,set(...args){saved.push(args);}}};}};
-function routeFixture(error=null,{creationFails=false}={}) {
+function routeFixture(error=null,{creationFails=false,newSalesEnabled=true}={}) {
   let holds=0,checkouts=0;const rpcArgs=[];
-  const b={id,booking_reference:'PRIVATE-REFERENCE',created_at:'2026-10-29T12:00:00Z',
+  const b={...stripeFixtureScope,id,booking_reference:'PRIVATE-REFERENCE',created_at:'2026-10-29T12:00:00Z',
     booking_access_token_hash:hash,status:'pending',payment_status:'pending',payment_flow:'stripe',finalization_status:'not_started',
     payment_expires_at:'2035-01-01T12:30:00Z',expired_at:null,price_snapshot:'500.00',currency_snapshot:'MXN',
     legal_terms_accepted_at:'2026-10-29T12:00:00Z',legal_adult_confirmed_at:'2026-10-29T12:00:00Z',
@@ -22,15 +23,15 @@ function routeFixture(error=null,{creationFails=false}={}) {
       return {data:table==='bookings'&&filters.every(([k,v])=>b[k]===v)?{...b}:null,error:null};}};return q;},
     rpc:async(name,args)=>{
       if(name==='record_booking_legal_acceptance_v1') return {data:args.p_access_token_hash===hash,error:null};
-      assert.equal(name,'create_stripe_booking_hold_with_legal_v1');
+      assert.equal(name,'create_stripe_booking_hold_with_legal_v2');
       assert.deepEqual(args.p_legal_acceptance,legalAcceptance);
       holds++;rpcArgs.push(args);return {data:{booking_id:id,booking_reference:'PRIVATE-REFERENCE',payment_expires_at:'2035-01-01T12:30:00Z'},error};}};
   const modules=testModules({
     "next/server":{NextResponse:fakeResponse},
-    "@/lib/stripe/server":{getStripeTestSiteUrl:()=>site,getStripeTestClient:()=>({}),getStripeBookingAdmin:()=>db},
+    '@/lib/stripe/server':stripeRuntimeFixture(db,{}, {...stripeFixtureConfig,newSalesEnabled}),
     "@/lib/bookings/finalize-paid-booking":{finalizePaidBooking:async()=>{throw new Error('Unpaid public flow must not finalize');}},
     "@/lib/stripe/checkout":{createOrRecoverCheckout:async()=>{checkouts++;if(creationFails)throw new Error("fixture checkout failure");return {url:"https://checkout.stripe.com/c/pay/cs_test_unit"};}},
-    "@/lib/stripe/expire-hold":{expireDueStripeHolds:async()=>{}},
+    "@/lib/stripe/expire-hold":{expireDueStripeHolds:async()=>{assert.fail("New checkout must never run an unrelated expiry batch");}},
   });
   return {...modules.load("src/app/api/bookings/stripe/checkout/route.ts"),get holds(){return holds;},get checkouts(){return checkouts;},logs:modules.logs,rpcArgs};
 }
@@ -95,8 +96,8 @@ test("checkout route passes the exact timestamp including microseconds to Postgr
 
 function confirmationFixture({valid=true,sessionMatches=true}={}) {
   const intakeToken='c'.repeat(64),destination=`${site}/formulario/${intakeToken}`;
-  const b={id,booking_reference:"PRIVATE-REFERENCE",booking_access_token_hash:hash,status:"confirmed",payment_status:"paid",payment_flow:"stripe",finalization_status:"completed"};
-  const attempt={id:'fixture-attempt',booking_id:id,stripe_checkout_session_id:'cs_test_fixture'};
+  const b={...stripeFixtureScope,id,booking_reference:"PRIVATE-REFERENCE",booking_access_token_hash:hash,status:"confirmed",payment_status:"paid",payment_flow:"stripe",finalization_status:"completed"};
+  const attempt={...stripeFixtureScope,id:'fixture-attempt',booking_id:id,stripe_checkout_session_id:'cs_test_fixture'};
   let form;
   const db={from(table){const filters=[];const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},
     not(){return q;},order(){return q;},limit(){return q;},async maybeSingle(){
@@ -154,7 +155,7 @@ function browserFixture({packageFlow=false,free=false,stripeCheckoutEnabled=true
     customerName:"Test Customer",customerEmail:"test@example.test",customerEmailConfirm:"test@example.test",customerPhone:"",customerNotes:"",isValidEmail:()=>true,
     stripeCheckoutEnabled,reservationRestartId:undefined,getBookingFlowId:async()=>flowId,
     withBookingFlowLock:async(_,work)=>work(),getBookingForFlow:()=>knownBooking,rememberBookingForFlow:(...args)=>calls.remembered.push(args),
-    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>free?{bookingReference:"FREE-1"}:packageFlow?{bookingReference:"PACKAGE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
+    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>free?{bookingReference:"FREE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
     router:{replace:url=>calls.navigations.push(url)},window:{location:{assign:url=>calls.navigations.push(url)}},console:{error(){}},
   };
   const run=new Function(...Object.keys(context),`${compiled}\nreturn handleConfirmReservation;`)(...Object.values(context));
@@ -174,8 +175,9 @@ test("Stripe browser real failure releases lock and retry retains public flow id
 });
 test("paid package cannot fall through to the legacy booking endpoint",async()=>{
   const f=browserFixture({packageFlow:true});await f.run();
-  assert.deepEqual(f.calls.posts,[]);assert.deepEqual(f.calls.navigations,[]);
-  assert.match(f.calls.errors.at(-1),/pago en línea no está disponible/);assert.equal(f.lock.current,false);
+  assert.equal(f.calls.posts.length,1);assert.equal(f.calls.posts[0].url,"/api/bookings/stripe/checkout");
+  assert.equal(f.calls.posts[0].body.service,"proceso");assert.equal(f.calls.posts[0].body.price,undefined);
+  assert.deepEqual(f.calls.navigations,["https://checkout.stripe.com/c/pay/cs_test_unit"]);assert.equal(f.lock.current,true);
 });
 
 test("paid 1:1 does not create a legacy confirmed booking when public Stripe is unavailable",async()=>{
@@ -285,4 +287,10 @@ test("booking form refuses creation and recovery before the unchecked terms are 
     assert.match(f.calls.errors.at(-1),/Términos y Condiciones/);
     assert.equal(f.lock.current,false);
   }
+});
+
+test('pausing new sales denies a new hold but preserves legitimate existing-booking retry',async()=>{
+  const f=routeFixture(null,{newSalesEnabled:false});
+  const denied=await f.POST(request());assert.equal(denied.status,409);assert.equal(f.holds,0);assert.equal(f.checkouts,0);
+  const recovery=await f.POST(request({bookingId:id}));assert.equal(recovery.status,200);assert.equal(f.holds,0);assert.equal(f.checkouts,1);
 });

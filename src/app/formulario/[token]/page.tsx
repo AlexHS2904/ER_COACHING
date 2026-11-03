@@ -65,6 +65,7 @@ export default async function IntakePage({
   const {
     form,
     booking,
+    processEntitlementActive,
   } = result;
 
   /* =====================================================
@@ -179,8 +180,8 @@ export default async function IntakePage({
     }
 
     if (
-      booking.status ===
-      "cancelled"
+      (booking.status === "cancelled" && !processEntitlementActive) ||
+      (form.process_id && !processEntitlementActive)
     ) {
       return (
         <StatusPage

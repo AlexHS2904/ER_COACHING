@@ -5,7 +5,10 @@ import {
 
 import {
   createProcessAccess,
+  recoverProcessAccessUrl,
 } from "@/lib/coaching/process-access";
+import { hasVerifiedProcessPurchase, type ProcessPurchase } from "@/lib/coaching/process-entitlement";
+import { assertStripeRecordScope, getStripeConfig } from "@/lib/stripe/server";
 
 import {
   sendProcessAccessEmail,
@@ -154,6 +157,11 @@ export async function POST(
             customer_email,
             service_name_snapshot,
             access_token_hash,
+            access_token_encrypted,
+            purchase_booking_id,
+            total_sessions,
+            stripe_mode,
+            stripe_account_id,
             status
           `,
         )
@@ -223,6 +231,27 @@ export async function POST(
             409,
         },
       );
+    }
+
+    // Verified Stripe processes retain their original durable private link.
+    // An admin re-send neither grants credit nor rotates purchase credentials.
+    if (process.stripe_mode) {
+      const purchase = process.purchase_booking_id ? await supabase.from("bookings")
+        .select("id,process_id,package_session_number,payment_status,payment_provider,payment_flow,payment_reference,paid_at,stripe_mode,stripe_account_id")
+        .eq("id", process.purchase_booking_id).maybeSingle() : { data: null, error: null };
+      if (purchase.error || !hasVerifiedProcessPurchase(process, purchase.data as ProcessPurchase | null)) {
+        return NextResponse.json({ error: "Este proceso requiere revisión antes de enviar el acceso." }, { status: 409 });
+      }
+      const config = getStripeConfig();
+      assertStripeRecordScope(process, { mode: config.mode, accountId: config.accountId });
+      const processAccessUrl = recoverProcessAccessUrl(process, config.siteUrl);
+      const sent = await sendProcessAccessEmail({ processId: process.id,
+        customerName: process.customer_name, customerEmail: process.customer_email,
+        serviceName: process.service_name_snapshot, processReference: process.process_reference,
+        processAccessUrl, idempotencyKey: `process-access/${process.id}/original`,
+      });
+      if (!sent.id || sent.error) return NextResponse.json({ error: "No fue posible enviar el acceso. El enlace actual sigue siendo válido." }, { status: 502 });
+      return NextResponse.json({ success: true, message: "El acceso original fue enviado al cliente." }, { status: 200 });
     }
 
     /* =====================================================

@@ -1,5 +1,10 @@
 # Stripe Checkout local / Test Mode
 
+> Referencia histórica de las pruebas Test iniciales. La preparación actual para
+> 1:1 y paquetes, separación de bases Test/Live, nueva migración y checklist está
+> en [Stripe Live: lanzamiento conjunto](stripe-live-launch.md). El arranque
+> actualizado ya no permite Test contra ER_COACHING; requiere una base aislada.
+
 Implementación Stripe Test Mode con aplicación local y Supabase local o ER_COACHING
 controlado. No habilita Live Mode. Los scripts no aplican SQL remoto. Las pruebas
 SQL automatizadas usan PostgreSQL temporal; el E2E manual usó ER_COACHING con

@@ -1,3 +1,5 @@
+import { liveFixture, liveMigrations } from './helpers/stripe-live-postgres.mjs';
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -14,15 +16,7 @@ const pg=localPostgres(),Stripe=createRequire(import.meta.url)('stripe');
 const site='http://localhost:3000',webhookSecret='whsec_fixture_only';
 const env={INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,13).toString('base64'),
   RESEND_FROM_EMAIL:'sender@example.test',COACH_EMAIL:'coach@example.test',STRIPE_WEBHOOK_SECRET:webhookSecret};
-const migrations=[
-  '20261027000100_activate_booking_intake_v2.sql',
-  '20261028000100_stripe_test_booking_lifecycle.sql',
-  '20261028000200_intake_v2_stable_service_identity.sql',
-  '20261028201527_stripe_failed_attempt_recovery.sql',
-  '20261029012540_decouple_intake_email_from_finalization.sql',
-  '20261029204535_legal_consent_evidence.sql',
-].map(name=>new URL(`../supabase/migrations/${name}`,import.meta.url));
-before(()=>pg.start(new URL('./fixtures/stripe-local-schema.sql',import.meta.url),migrations));
+before(()=>pg.start(liveFixture,liveMigrations));
 after(()=>pg.stop());
 const rows=sql=>JSON.parse(pg.sql(sql)||'null');
 const literal=value=>`'${String(value).replaceAll("'","''")}'`;
@@ -52,16 +46,22 @@ function fixture() {
     },
   }});
   checkout.client.events=eventClient.events;
+  checkout.client.paymentIntents={retrieve:async intent=>{
+    const session=[...checkout.sessions.values()].find(s=>s.payment_intent===intent);
+    if(!session)throw new Error('Unknown fixture payment');
+    return {id:intent,status:'succeeded',livemode:session.livemode,amount:session.amount_total,amount_received:session.amount_total,
+      currency:session.currency,metadata:session.metadata,latest_charge:{payment_method_details:{type:'card'}}};
+  }};
   const db={...adapter,async rpc(name,args){
     const result=await adapter.rpc(name,args);
     // This RPC returns a PostgREST table, unlike the JSON-returning Stripe RPCs.
-    return name==='activate_booking_intake_v2'?
+    return ['activate_booking_intake_v2','activate_stripe_intake_v1'].includes(name)?
       {...result,data:result.data?[result.data]:null}:result;
   }};
   const components=Object.fromEntries(['Body','Button','Container','Head','Heading','Hr','Html','Preview','Section','Text'].map(name=>[name,name]));
   const modules=testModules({
     'next/server':{NextResponse:{json:(data,init={})=>({data,status:init.status??200})},after:callback=>deferred.push(callback)},
-    '@/lib/stripe/server':{getStripeBookingAdmin:()=>db,getStripeTestClient:()=>checkout.client,getStripeTestSiteUrl:()=>site},
+    '@/lib/stripe/server':stripeRuntimeFixture(db,checkout.client),
     '@/lib/supabase/admin':{getSupabaseAdmin:()=>db},
     '@/lib/google/calendar':{ensurePaidBookingCalendar:async input=>{
       calls.calendar.push(input.bookingId);
@@ -93,10 +93,11 @@ async function openBooking(f) {
   const token=randomBytes(32).toString('hex');
   const access=f.modules.load('src/lib/stripe/access.ts');
   const legal=f.modules.load('src/lib/legal/acceptance.ts').currentBookingAcceptance;
-  const h=await f.db.rpc('create_stripe_booking_hold_with_legal_v1',{
+  const h=await f.db.rpc('create_stripe_booking_hold_with_legal_v2',{
     p_service_slug:'sesion-1-1',p_starts_at:new Date(Date.UTC(2036,0,1+2*day++,12)).toISOString(),
     p_customer_name:'Fixture customer',p_customer_email:'customer@example.test',p_customer_phone:null,p_notes:null,
     p_access_token_hash:access.hashBookingAccess(token),p_legal_acceptance:legal,
+    p_stripe_mode:"test",p_stripe_account_id:"acct_fixture",p_site_url:site,
   });
   assert.equal(h.error,null);
   const id=h.data.booking_id,before=booking(id),originalEvidence=evidence(before);

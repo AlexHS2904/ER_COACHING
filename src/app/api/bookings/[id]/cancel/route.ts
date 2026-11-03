@@ -16,6 +16,8 @@ import {
 } from "@/lib/supabase/server";
 import { sendBookingChangeEmail } from "@/lib/email/send-booking-change-email";
 import { googleErrorLogMetadata } from "@/lib/google/safe-error";
+import { requestStripeBookingChange } from "@/lib/bookings/stripe-booking-changes";
+import { getStripeConfig } from "@/lib/stripe/server";
 
 type RouteContext = {
   params: Promise<{
@@ -99,6 +101,31 @@ export async function POST(
   const supabase =
     getSupabaseAdmin();
 
+  // Reuse the existing active-admin endpoint. Identity is the verified session,
+  // never a browser-supplied actor; this action sends no Calendar/email request.
+  if (_request.headers?.get("content-type")?.includes("application/json")) {
+    try {
+      const body = await _request.json();
+      if (!body || Object.keys(body).length !== 1 ||
+          !["no_show", "approve_replacement", "consume"].includes(body.action)) {
+        return NextResponse.json({ error: "La decisión no es válida." }, { status: 400 });
+      }
+      const config = getStripeConfig();
+      if (_request.headers.get("origin") !== config.siteUrl) {
+        return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+      }
+      const result = await supabase.rpc("resolve_stripe_session_v1", {
+        p_booking_id: id, p_action: body.action, p_admin_user_id: userId,
+        p_stripe_mode: config.mode, p_stripe_account_id: config.accountId,
+      });
+      if (result.error || !result.data) throw new Error("resolution_unavailable");
+      return NextResponse.json({ ok: true, status: result.data.status,
+        sessionResolution: result.data.session_resolution }, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return NextResponse.json({ error: "No fue posible guardar la decisión. Revisa el estado y la vigencia de la sesión." }, { status: 409 });
+    }
+  }
+
   const {
     data: booking,
     error: bookingError,
@@ -147,10 +174,13 @@ export async function POST(
   }
 
   if (booking.payment_flow === "stripe") {
-    return NextResponse.json(
-      { error: "La gestión administrativa de reservas Stripe requiere conciliación y todavía no está habilitada en esta fase local." },
-      { status: 409 },
-    );
+    try {
+      return NextResponse.json(await requestStripeBookingChange(booking.id, "cancelled", null, userId),
+        { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return NextResponse.json({ error: "Esta reserva requiere revisión antes de guardar el cambio." },
+        { status: 409, headers: { "Cache-Control": "no-store" } });
+    }
   }
 
   if (

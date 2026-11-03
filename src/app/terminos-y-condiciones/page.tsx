@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { LEGAL_TERMS_VERSION, LEGAL_UPDATED_LABEL, legalRobotsMetadata } from "@/lib/legal/documents";
+import { LEGAL_TERMS_VERSION, LEGAL_TERMS_UPDATED_LABEL, legalRobotsMetadata } from "@/lib/legal/documents";
 import { legalProvider } from "@/lib/legal/provider";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default function TermsPage() {
       <article className="mx-auto max-w-3xl">
         <Link href="/" className="text-sm text-brand-wine hover:underline">← Volver al inicio</Link>
         <h1 className="mt-10 font-display text-4xl sm:text-5xl">Términos y condiciones</h1>
-        <p className="mt-5 text-sm opacity-70">Última actualización: {LEGAL_UPDATED_LABEL}</p>
+        <p className="mt-5 text-sm opacity-70">Última actualización: {LEGAL_TERMS_UPDATED_LABEL}</p>
         <p className="mt-2 text-sm opacity-70">Versión: {LEGAL_TERMS_VERSION}</p>
 
         <div className="mt-10 space-y-9 leading-8">
@@ -62,11 +62,12 @@ export default function TermsPage() {
               modalidad, número de sesiones cuando corresponda, fecha, horario, precio y moneda.
               El importe total aplicable debe conocerse antes de aceptar la contratación o pagar.
               Los servicios sujetos a cotización requieren una propuesta previa.</p>
-            <p className="mt-3">Los pagos en línea habilitados para la sesión individual se expresan
-              en pesos mexicanos (MXN). Los paquetes y procesos conservan sus condiciones particulares
-              y su acceso para programar sesiones. No se presupone que compartan el flujo de pago de
-              la sesión individual. Cada sesión se programa según disponibilidad y se sujeta a la
-              política de cambios con 24 horas de anticipación descrita a continuación.</p>
+            <p className="mt-3">Los pagos en línea habilitados para sesiones individuales y paquetes
+              se expresan en pesos mexicanos (MXN). El paquete incluye seis sesiones de 90 minutos y
+              un solo pago por el importe total mostrado. Su vigencia es de 90 días naturales desde
+              la confirmación del pago; las sesiones deben realizarse dentro de ese plazo y se
+              programan según disponibilidad. Estas nuevas condiciones no se aplican retroactivamente
+              a paquetes contratados anteriormente.</p>
             <p className="mt-3">Los paquetes o procesos no generan un reembolso parcial por su
               cancelación voluntaria o por sesiones que decidas no utilizar, salvo los derechos
               obligatorios que correspondan. Esta regla no permite retener importes de un servicio
@@ -76,7 +77,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold">5. Reservas y plazo de pago</h2>
             <p className="mt-3">Las reservas dependen de la disponibilidad real. En el flujo de
-              Checkout para la sesión individual elegible, proceder al pago crea una retención
+              Checkout para sesiones individuales y la primera sesión de un paquete, proceder al pago crea una retención
               provisional del horario durante 30 minutos. El contador usa el vencimiento original;
               actualizar la página o reintentar no reinicia ese plazo.</p>
             <p className="mt-3">La retención no equivale a pago ni a confirmación definitiva. Salir
@@ -107,9 +108,8 @@ export default function TermsPage() {
               privados. Solicitar un cambio no implica por sí mismo su aprobación o un reembolso;
               la respuesta debe respetar tus derechos legales.</p>
             <p className="mt-3">Actualmente no hay autoservicio de cancelación o reprogramación ni
-              reembolso automático. La gestión administrativa de reservas Stripe aún no está habilitada
-              en esta fase. Esa limitación técnica no elimina derechos del consumidor ni autoriza a
-              retener un pago contrario a la ley.</p>
+              reembolso automático. Edna gestiona las solicitudes; esta modalidad no elimina
+              derechos del consumidor ni autoriza a retener un pago contrario a la ley.</p>
             <p className="mt-3">Si solicitas reprogramar con al menos 24 horas de anticipación al
               inicio de la sesión, el cambio no tiene costo y queda sujeto a disponibilidad. Envía
               la solicitud al correo de atención e indica tu referencia y el horario de la sesión.</p>
@@ -118,9 +118,10 @@ export default function TermsPage() {
               otro que resulte obligatorio conforme a la ley. No se excluyen reclamaciones por
               incumplimiento o por servicios no prestados.</p>
             <p className="mt-3">Si solicitas cancelar o reprogramar con menos de 24 horas de
-              anticipación, la sesión puede considerarse utilizada y no hay derecho automático a
-              reprogramarla sin costo. La coach valorará de forma razonada las situaciones
-              excepcionales, incluidos caso fortuito o fuerza mayor, sin limitar derechos legales.</p>
+              anticipación, Edna revisará el caso y decidirá si corresponde reponer la sesión.
+              Mientras esté pendiente, el derecho queda reservado, sin reposición ni consumo definitivo.
+              Una reposición autorizada del paquete conserva su número de sesión y la vigencia original,
+              sin cobro adicional. Se respetan los derechos legales irrenunciables.</p>
             <p className="mt-3">Si ER Coaching cancela, ofrecerá reprogramación sin costo. Si no
               es posible acordar una alternativa razonable aceptada por ti, se reembolsará el
               importe correspondiente al servicio no prestado; no se retendrá ese importe por la
@@ -135,10 +136,9 @@ export default function TermsPage() {
 
           <section>
             <h2 className="text-xl font-semibold">8. Asistencia e inasistencias</h2>
-            <p className="mt-3">La sesión se prepara para el horario confirmado. Si no asistes,
-              puede considerarse utilizada. Se valorarán de forma razonada las circunstancias
-              excepcionales, incluidos caso fortuito o fuerza mayor, con respeto a los derechos
-              obligatorios aplicables.</p>
+            <p className="mt-3">La sesión se prepara para el horario confirmado. La inasistencia
+              sin aviso se considera una sesión utilizada, sin reposición ni reembolso, salvo los
+              derechos legales irrenunciables o una excepción expresamente autorizada por Edna.</p>
           </section>
 
           <section>

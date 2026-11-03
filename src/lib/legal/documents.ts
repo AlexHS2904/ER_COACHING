@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 
 // Public version identifiers validated on requests. Durable records remain
 // subject to the proposed database integration; these constants do not persist them.
-export const LEGAL_TERMS_VERSION = "2026-10-29.2";
+export const LEGAL_TERMS_VERSION = "2026-10-31.1";
+export const LEGAL_TERMS_UPDATED_LABEL = "31 de octubre de 2026";
 export const PRIVACY_NOTICE_VERSION = "2026-10-29.2";
 export const LEGAL_UPDATED_LABEL = "29 de octubre de 2026";
 
