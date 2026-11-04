@@ -26,7 +26,9 @@ export function getStripeConfig(): StripeConfig {
   const accountId = process.env.STRIPE_EXPECTED_ACCOUNT_ID ?? "";
   const key = process.env.STRIPE_SECRET_KEY ?? "";
   if ((mode !== "test" && mode !== "live") || !/^acct_[A-Za-z0-9]+$/.test(accountId) ||
-      !key.startsWith(mode === "live" ? "sk_live_" : "sk_test_")) throw new Error("stripe_configuration_invalid");
+      !(mode === "live" ? key.startsWith("sk_live_") || key.startsWith("rk_live_") : key.startsWith("sk_test_"))) {
+    throw new Error("stripe_configuration_invalid");
+  }
   const site = origin(process.env.NEXT_PUBLIC_SITE_URL);
   const database = origin(process.env.NEXT_PUBLIC_SUPABASE_URL);
   if (mode === "live") {

@@ -14,6 +14,25 @@ test('sales default off while account-bound recovery remains configured',()=>{
   const s=server();assert.equal(s.isStripeCheckoutEnabled(),false);assert.equal(s.getStripeConfig().mode,'test');
   assert.equal(s.getStripeBookingAdmin().marker,'authorized database');
 });
+for(const prefix of ['sk_live_', 'rk_live_']) {
+  test(`${prefix} accepted in Live while the sales switch remains enforced`,()=>{
+    const config={...live,STRIPE_SECRET_KEY:`${prefix}fixture_only`};
+    assert.equal(server(config).getStripeConfig().mode,'live');
+    assert.equal(server({...config,PAID_BOOKINGS_ENABLED:'true'}).isStripeCheckoutEnabled(),true);
+    const paused=server({...config,PAID_BOOKINGS_ENABLED:'false'});
+    assert.equal(paused.getStripeConfig().newSalesEnabled,false);
+    assert.equal(paused.isStripeCheckoutEnabled(),false);
+    assert.throws(()=>paused.assertStripeSalesReady(),/stripe_new_sales_not_ready/);
+    assert.throws(()=>server({STRIPE_SECRET_KEY:config.STRIPE_SECRET_KEY}).getStripeConfig(),/stripe_configuration_invalid/);
+  });
+}
+test('Live rejects both unrestricted and restricted Test keys',()=>{
+  for(const key of ['sk_test_fixture_only','rk_test_fixture_only']) {
+    const s=server({...live,STRIPE_SECRET_KEY:key,PAID_BOOKINGS_ENABLED:'true'});
+    assert.throws(()=>s.getStripeConfig(),/stripe_configuration_invalid/);
+    assert.equal(s.isStripeCheckoutEnabled(),false);
+  }
+});
 test('Live exact production environment only, Test cannot share production database',()=>{
   assert.equal(server({...live,PAID_BOOKINGS_ENABLED:'true'}).isStripeCheckoutEnabled(),true);
   for(const changes of [{VERCEL_ENV:'preview'},{VERCEL:undefined},{NEXT_PUBLIC_SITE_URL:'http://www.ednarojocoaching.com'},
