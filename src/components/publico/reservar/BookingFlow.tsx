@@ -28,6 +28,7 @@ type AvailableSlot = {
 
 type BookingFlowProps = {
   stripeCheckoutEnabled?: boolean;
+  privateLiveTest?: boolean;
   reservationRestartId?: string;
   services: Service[];
   initialServiceSlug?: string;
@@ -118,6 +119,7 @@ export default function BookingFlow({
   services,
   initialServiceSlug,
   stripeCheckoutEnabled = false,
+  privateLiveTest = false,
   reservationRestartId,
 }: BookingFlowProps) {
     const router = useRouter();
@@ -513,7 +515,9 @@ const [
             ? { bookingId, legalAcceptance: currentBookingAcceptance }
             : { ...payload, flowId, legalAcceptance: currentBookingAcceptance };
           const post = () => fetch("/api/bookings/stripe/checkout", {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+            method: "POST", headers: { "Content-Type": "application/json",
+              ...(privateLiveTest ? { "X-ER-Admin-Live-Test": "1" } : {}),
+            }, body: JSON.stringify(body),
           });
           let response = await post();
           let result = await response.json();

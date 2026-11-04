@@ -139,8 +139,8 @@ const ast=ts.createSourceFile("BookingFlow.tsx",source,ts.ScriptTarget.Latest,tr
 let handler;
 (function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text==="handleConfirmReservation")handler=node;ts.forEachChild(node,visit);})(ast);
 const compiled=ts.transpileModule(handler.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-function browserFixture({packageFlow=false,free=false,stripeCheckoutEnabled=true,failFirst=false,bootstrap=false,name="Sesión 1:1",knownBooking=null,failAfterHold=false,accepted=true,recoveredStatus=null}={}) {
-  const calls={posts:[],state:[],navigations:[],remembered:[],errors:[]},lock={current:false};let failed=false,bootstrapped=false;
+function browserFixture({packageFlow=false,free=false,stripeCheckoutEnabled=true,privateLiveTest=false,failFirst=false,bootstrap=false,name="Sesión 1:1",knownBooking=null,failAfterHold=false,accepted=true,recoveredStatus=null}={}) {
+  const calls={posts:[],headers:[],state:[],navigations:[],remembered:[],errors:[]},lock={current:false};let failed=false,bootstrapped=false;
   const currentService={slug:packageFlow?"proceso":"sesion-1-1",name:packageFlow?"Proceso":name,
     service_type:packageFlow?"package":"single",session_count:packageFlow?6:1,price:free?0:packageFlow?2500:500};
   const paymentPolicy=testModules().load("src/lib/bookings/payment-policy.ts");
@@ -153,9 +153,9 @@ function browserFixture({packageFlow=false,free=false,stripeCheckoutEnabled=true
     currentServicePaymentUnavailable:currentServiceRequiresPayment&&!currentServiceCanUseStripe,
     selectedDate:"2035-01-01",selectedSlot:{starts_at:"2035-01-01T12:00:00Z"},
     customerName:"Test Customer",customerEmail:"test@example.test",customerEmailConfirm:"test@example.test",customerPhone:"",customerNotes:"",isValidEmail:()=>true,
-    stripeCheckoutEnabled,reservationRestartId:undefined,getBookingFlowId:async()=>flowId,
+    stripeCheckoutEnabled,privateLiveTest,reservationRestartId:undefined,getBookingFlowId:async()=>flowId,
     withBookingFlowLock:async(_,work)=>work(),getBookingForFlow:()=>knownBooking,rememberBookingForFlow:(...args)=>calls.remembered.push(args),
-    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>free?{bookingReference:"FREE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
+    fetch:async(url,options)=>{calls.posts.push({url,body:JSON.parse(options.body)});calls.headers.push(options.headers);if(failFirst&&!failed){failed=true;return {ok:false,json:async()=>({error:"temporary failure",...(failAfterHold?{bookingId:id,statusUrl:"/reservar/confirmada?ref=PRIVATE-REFERENCE"}:{})})};}if(bootstrap&&!bootstrapped){bootstrapped=true;return {ok:true,json:async()=>({requiresCookie:true})};}if(recoveredStatus)return {ok:true,json:async()=>({bookingId:id,...recoveredStatus})};return {ok:true,json:async()=>free?{bookingReference:"FREE-1"}:{bookingId:id,checkoutUrl:"https://checkout.stripe.com/c/pay/cs_test_unit"}};},
     router:{replace:url=>calls.navigations.push(url)},window:{location:{assign:url=>calls.navigations.push(url)}},console:{error(){}},
   };
   const run=new Function(...Object.keys(context),`${compiled}\nreturn handleConfirmReservation;`)(...Object.values(context));
@@ -167,6 +167,19 @@ test("Stripe browser double click sends one POST and keeps lock through external
   assert.equal(f.calls.posts[0].body.flowId,flowId);assert.equal(f.calls.posts[0].body.price,undefined);
   assert.equal(JSON.stringify(f.calls.posts).includes(token),false);
   assert.equal(f.lock.current,true);assert.deepEqual(f.calls.state,[true]);
+});
+test("private admin flow alone adds its intention header, including cookie bootstrap",async()=>{
+  const ordinary=browserFixture();await ordinary.run();
+  assert.equal(ordinary.calls.headers[0]['X-ER-Admin-Live-Test'],undefined);
+  const privateFlow=browserFixture({privateLiveTest:true,bootstrap:true});await privateFlow.run();
+  assert.equal(privateFlow.calls.posts.length,2);
+  for(const headers of privateFlow.calls.headers) {
+    assert.equal(headers['Content-Type'],'application/json');
+    assert.equal(headers['X-ER-Admin-Live-Test'],'1');
+  }
+  assert.equal(privateFlow.calls.posts.every(post=>post.url==='/api/bookings/stripe/checkout'),true);
+  assert.deepEqual(privateFlow.calls.posts[0].body.legalAcceptance,legalAcceptance);
+  assert.equal(JSON.stringify(privateFlow.calls.posts).includes('privateLiveTest'),false);
 });
 test("Stripe browser real failure releases lock and retry retains public flow identity",async()=>{
   const f=browserFixture({failFirst:true});await f.run();assert.equal(f.lock.current,false);await f.run();

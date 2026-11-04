@@ -29,6 +29,17 @@ export async function POST(request: NextRequest) {
     const config = getStripeConfig();
     site = config.siteUrl;
     if (request.headers.get("origin") !== site) throw new StripeBookingError("invalid_access");
+    let privateLiveTest = false;
+    const testIntent = request.headers.get("x-er-admin-live-test");
+    if (testIntent !== null) {
+      if (testIntent !== "1" || config.mode !== "live") throw new StripeBookingError("invalid_access");
+      // An intention header is public input, never a credential. Keep the
+      // existing public path free of admin-session work unless requested.
+      const { authorizeAdminRequest } = await import("@/lib/admin/authorize-admin");
+      const admin = await authorizeAdminRequest();
+      if (!admin.ok) return respond({ error: admin.error }, admin.status);
+      privateLiveTest = true;
+    }
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new StripeBookingError("invalid_request");
     const recovering = isBookingId(body.bookingId);
@@ -81,7 +92,8 @@ export async function POST(request: NextRequest) {
         if (acceptance.data !== true) throw new StripeBookingError("invalid_access");
       }
     } else {
-      assertStripeSalesReady(config);
+      const salesOptions = privateLiveTest ? { privateLiveTest: true } : {};
+      assertStripeSalesReady(config, salesOptions);
       const allowed = ["service", "startsAt", "name", "email", "phone", "notes", "flowId", "legalAcceptance"];
       if (Object.keys(body).some((key) => !allowed.includes(key)) ||
           !isBookingId(body.flowId) || typeof body.service !== "string" || !body.service.trim() ||
@@ -92,7 +104,7 @@ export async function POST(request: NextRequest) {
           (body.notes != null && (typeof body.notes !== "string" || body.notes.length > 2000))) {
         throw new StripeBookingError("invalid_request");
       }
-      const context = await getVerifiedStripeContext({ forNewSale: true });
+      const context = await getVerifiedStripeContext({ forNewSale: true, ...salesOptions });
       await verifyImmediatePaymentMethods(context.stripe, config);
       const catalog = await assertStripeCatalogReady(db);
       const service = catalog.find((item) => item.slug === body.service.trim());

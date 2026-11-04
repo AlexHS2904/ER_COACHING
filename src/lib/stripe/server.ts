@@ -58,13 +58,17 @@ export function isStripeCheckoutEnabled() {
 
 /** Configuration prerequisites for NEW sales only. Existing receipts, private
  * access, webhook delivery and recovery must survive a paused sales switch. */
-export function assertStripeSalesReady(config = getStripeConfig()) {
+export function assertStripeSalesReady(config = getStripeConfig(), options: { privateLiveTest?: boolean } = {}) {
   const strongWorkerSecret = (value: string | undefined) => Boolean(value && value.length >= 32 && !/\s/.test(value));
   const signatureSecret = process.env.STRIPE_WEBHOOK_SECRET;
   const workerReady = config.mode === "live"
     ? strongWorkerSecret(process.env.CRON_SECRET) || strongWorkerSecret(process.env.STRIPE_WORKER_SECRET)
     : strongWorkerSecret(process.env.STRIPE_LOCAL_WORKER_SECRET);
-  if (!config.newSalesEnabled || !/^pmc_[A-Za-z0-9]+$/.test(config.paymentMethodConfigurationId) ||
+  // Server-only context, supplied after active-admin authorization. It changes
+  // only the sales switch; the Live environment and every prerequisite remain.
+  const privateLiveTest = options.privateLiveTest === true && config.mode === "live";
+  if ((options.privateLiveTest && !privateLiveTest) || (!config.newSalesEnabled && !privateLiveTest) ||
+      !/^pmc_[A-Za-z0-9]+$/.test(config.paymentMethodConfigurationId) ||
       !signatureSecret?.startsWith("whsec_") || signatureSecret.length < 24 || /\s/.test(signatureSecret) || !workerReady) {
     throw new Error("stripe_new_sales_not_ready");
   }
@@ -75,13 +79,14 @@ export function getStripeClient() {
     apiVersion: "2026-09-30.endive", timeout: 10_000, maxNetworkRetries: 1,
   });
 }
-export async function getVerifiedStripeContext(options: { forNewSale?: boolean } = {}) {
+export async function getVerifiedStripeContext(options: { forNewSale?: boolean; privateLiveTest?: boolean } = {}) {
   const config = getStripeConfig();
-  if (options.forNewSale) assertStripeSalesReady(config);
+  const forNewSale = options.forNewSale === true || options.privateLiveTest === true;
+  if (forNewSale) assertStripeSalesReady(config, options);
   const stripe = getStripeClient();
   const account = await stripe.accounts.retrieve(null);
   if (account.id !== config.accountId) throw new Error("stripe_account_mismatch");
-  if (options.forNewSale && config.mode === "live" &&
+  if (forNewSale && config.mode === "live" &&
       (account.charges_enabled !== true || account.payouts_enabled !== true)) throw new Error("stripe_live_account_not_ready");
   return { config, stripe };
 }

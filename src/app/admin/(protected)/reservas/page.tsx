@@ -1,11 +1,49 @@
 import { requireAdmin } from "@/lib/admin/require-admin";
 
 import ReservationsClient from "@/components/admin/ReservationsClient";
+import BookingFlow from "@/components/publico/reservar/BookingFlow";
 
 import { createClient } from "@/lib/supabase/server";
+import { getActiveServices, type Service } from "@/lib/data/services";
+import { assertStripeCatalogReady, getStripeConfig, getVerifiedStripeContext, verifyImmediatePaymentMethods } from "@/lib/stripe/server";
 
-export default async function ReservasPage() {
+export default async function ReservasPage({ searchParams }: {
+  searchParams?: Promise<{ checkoutLiveTest?: string }>;
+}) {
   await requireAdmin();
+
+  if ((await searchParams)?.checkoutLiveTest === "1") {
+    let services: Service[] = [];
+    let checkoutEnabled = false;
+    try {
+      if (getStripeConfig().mode !== "live") throw new Error("private_live_test_unavailable");
+      const { config, stripe } = await getVerifiedStripeContext({ forNewSale: true, privateLiveTest: true });
+      await verifyImmediatePaymentMethods(stripe, config);
+      const catalog = await assertStripeCatalogReady();
+      const serviceIds = new Set(catalog.map((service) => service.id));
+      services = (await getActiveServices()).filter((service) => serviceIds.has(service.id));
+      checkoutEnabled = services.length === catalog.length;
+    } catch { /* Keep the private form unavailable without exposing provider details. */ }
+
+    return (
+      <main className="px-5 py-8 sm:px-8 lg:px-10 xl:px-12">
+        <div className="mx-auto max-w-[1280px]">
+          <h1 className="font-display text-4xl font-semibold text-brand-brown sm:text-5xl">
+            Prueba privada de pago Live
+          </h1>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-brand-brown/70">
+            Esta prueba realiza un cobro real. Las nuevas reservas de pago siguen pausadas para el público.
+          </p>
+          {!checkoutEnabled && (
+            <p role="alert" className="mt-6 text-sm text-[#8A3535]">
+              La prueba privada no está disponible. Revisa la configuración antes de continuar.
+            </p>
+          )}
+          <BookingFlow services={services} stripeCheckoutEnabled={checkoutEnabled} privateLiveTest />
+        </div>
+      </main>
+    );
+  }
 
   const supabase = await createClient();
 
