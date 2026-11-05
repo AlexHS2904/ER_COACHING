@@ -20,9 +20,10 @@ function fixture({authorized=true,mode='live',ready=true}={}) {
     '@/lib/data/services':{getActiveServices:async()=>{calls.push('services');return services;}},
     '@/lib/stripe/server':{
       getStripeConfig:()=>{calls.push('config');return {mode,newSalesEnabled:false};},
+      getStripeBookingAdmin:()=>({privateAdminDatabase:true}),
       getVerifiedStripeContext:async options=>{calls.push(['stripe',options]);if(!ready)throw new Error('private_provider_detail');return {config:{mode,newSalesEnabled:false},stripe:{}};},
       verifyImmediatePaymentMethods:async()=>{calls.push('methods');},
-      assertStripeCatalogReady:async()=>{calls.push('catalog');return services.slice(0,2);},
+      assertStripeCatalogReady:async(db,options)=>{assert.deepEqual(db,{privateAdminDatabase:true});assert.deepEqual(options,{privateLiveTest:true});calls.push('catalog');return services.slice(0,2);},
     },
   });
   return {page:modules.load(path).default,calls,BookingFlow,ReservationsClient};

@@ -2,7 +2,9 @@ export function bookingConfirmationState(booking: {
   status: string; payment_status: string; payment_flow?: string | null;
   finalization_status?: string | null; expired_at?: string | null;
   payment_expires_at?: string | null;
-}, intakeStatus?: "waiting" | "submitted" | "available" | "unavailable", serverNow = Date.now()) {
+  requires_intake_snapshot?: boolean | null;
+}, intakeStatus?: "waiting" | "submitted" | "available" | "unavailable" | "not_required", serverNow = Date.now()) {
+  const preparation = booking.requires_intake_snapshot === false ? "tu sesión" : "tu sesión y formulario";
   if (booking.finalization_status === "review_required") return {
     title: "Estamos revisando tu pago", detail: "No realices otro pago. Nos comunicaremos contigo para resolver tu reserva.", refresh: false,
   };
@@ -14,8 +16,11 @@ export function bookingConfirmationState(booking: {
     if (booking.finalization_status !== "completed") return {
       title: "Pago confirmado",
       detail: booking.finalization_status === "retryable"
-        ? "Tu pago está registrado. Estamos reintentando la preparación de tu sesión y formulario; no necesitas pagar nuevamente."
-        : "Estamos preparando tu sesión y formulario…", refresh: true,
+        ? `Tu pago está registrado. Estamos reintentando la preparación de ${preparation}; no necesitas pagar nuevamente.`
+        : `Estamos preparando ${preparation}…`, refresh: true,
+    };
+    if (booking.requires_intake_snapshot === false || intakeStatus === "not_required") return {
+      title: "Reserva confirmada", detail: "Tu sesión está confirmada. Revisa tu correo para consultar los detalles y el enlace de Meet.", refresh: false,
     };
     if (intakeStatus === "available") return {
       title: "Redirigiendo a tu formulario", detail: "Tu sesión está confirmada. En un momento podrás completar tu formulario previo.", refresh: false,
@@ -32,7 +37,7 @@ export function bookingConfirmationState(booking: {
     title: "Reserva confirmada", detail: "Tu horario está reservado. Recibirás los detalles de tu sesión por correo electrónico.", refresh: false,
   };
   if (booking.payment_status === "paid") return {
-    title: "Pago confirmado", detail: "Estamos preparando tu sesión y formulario…", refresh: true,
+    title: "Pago confirmado", detail: `Estamos preparando ${preparation}…`, refresh: true,
   };
   if (booking.payment_flow === "stripe" && booking.payment_expires_at &&
       Date.parse(booking.payment_expires_at) <= serverNow) return {

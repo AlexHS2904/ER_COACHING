@@ -19,6 +19,7 @@ type Params = {
   stripeScope?: StripeRuntimeScope;
   processId?: string | null;
   allowUnavailableProcessIntake?: boolean;
+  requiresIntakeSnapshot?: boolean | null;
 };
 
 type Activation = {
@@ -42,7 +43,9 @@ export async function activateBookingIntake({
   stripeScope,
   processId = null,
   allowUnavailableProcessIntake = false,
+  requiresIntakeSnapshot,
 }: Params) {
+  if (requiresIntakeSnapshot === false) throw new Error("intake_ineligible");
   const supabase = getSupabaseAdmin();
   const existing = await supabase.from("booking_intake_forms")
     .select("access_token_hash,access_token_encrypted")

@@ -56,14 +56,22 @@ export async function finalizePaidBooking(bookingId: string, expectedScope?: Str
     await save("calendar", calendar);
     if (!calendar.eventId || !calendar.meetUrl) throw new Error("meet_pending");
 
-    step = "intake";
-    const intake = await activateBookingIntake({
-      bookingId, provider: "stripe", paymentReference: booking.payment_reference,
-      siteUrl: booking.stripe_site_origin, sendReadyEmail: false,
-      stripeScope: config, processId: booking.process_id,
-      allowUnavailableProcessIntake: Boolean(booking.process_id && (booking.package_session_number > 1 || booking.replaces_booking_id)),
-    });
-    if (!intake.canonicalIntakeUrl && !booking.customer_email_id && booking.stripe_customer_email_started_at) {
+    // NULL preserves the established Intake contract for historical purchases.
+    // New holds freeze an explicit requirement, independent of catalogue edits.
+    const requiresIntake = booking.requires_intake_snapshot !== false;
+    let canonicalIntakeUrl: string | null = null;
+    if (requiresIntake) {
+      step = "intake";
+      const intake = await activateBookingIntake({
+        bookingId, provider: "stripe", paymentReference: booking.payment_reference,
+        siteUrl: booking.stripe_site_origin, sendReadyEmail: false,
+        stripeScope: config, processId: booking.process_id,
+        ...(booking.requires_intake_snapshot == null ? {} : { requiresIntakeSnapshot: booking.requires_intake_snapshot }),
+        allowUnavailableProcessIntake: Boolean(booking.process_id && (booking.package_session_number > 1 || booking.replaces_booking_id)),
+      });
+      canonicalIntakeUrl = intake.canonicalIntakeUrl;
+    }
+    if (requiresIntake && !canonicalIntakeUrl && !booking.customer_email_id && booking.stripe_customer_email_started_at) {
       // Missing recovery material must never remove a CTA from an ambiguous
       // delivery already associated with this idempotency key.
       throw new Error("customer_email_review_required");
@@ -85,7 +93,7 @@ export async function finalizePaidBooking(bookingId: string, expectedScope?: Str
         sessionCount: booking.session_count_snapshot ?? 1, price: booking.price_snapshot,
         currency: booking.currency_snapshot, notes: booking.notes,
         meetUrl: booking.google_meet_url, calendarUrl: booking.google_calendar_url,
-        canonicalIntakeUrl: intake.canonicalIntakeUrl,
+        canonicalIntakeUrl,
         processAccessUrl,
         ...(booking.process_id && (booking.package_session_number > 1 || booking.replaces_booking_id)
           ? { priceTextOverride: "Incluido en tu proceso" } : {}),

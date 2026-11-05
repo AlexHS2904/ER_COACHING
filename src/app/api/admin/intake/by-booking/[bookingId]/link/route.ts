@@ -72,7 +72,8 @@ export async function GET(
         `
           id,
           payment_status,
-          service_name_snapshot
+          service_name_snapshot,
+          requires_intake_snapshot
         `,
       )
       .eq(
@@ -94,6 +95,12 @@ export async function GET(
           status: 404,
         },
       );
+    }
+
+    if (
+      booking.requires_intake_snapshot === false
+    ) {
+      return NextResponse.json({ error: "Esta reserva no requiere formulario." }, { status: 409 });
     }
 
     if (

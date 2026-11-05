@@ -23,7 +23,7 @@ function routeFixture(error=null,{creationFails=false,newSalesEnabled=true}={}) 
       return {data:table==='bookings'&&filters.every(([k,v])=>b[k]===v)?{...b}:null,error:null};}};return q;},
     rpc:async(name,args)=>{
       if(name==='record_booking_legal_acceptance_v1') return {data:args.p_access_token_hash===hash,error:null};
-      assert.equal(name,'create_stripe_booking_hold_with_legal_v2');
+      assert.equal(name,'create_stripe_booking_hold_with_legal_v3');
       assert.deepEqual(args.p_legal_acceptance,legalAcceptance);
       holds++;rpcArgs.push(args);return {data:{booking_id:id,booking_reference:'PRIVATE-REFERENCE',payment_expires_at:'2035-01-01T12:30:00Z'},error};}};
   const modules=testModules({

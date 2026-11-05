@@ -35,6 +35,9 @@ type UpdateServiceBody = {
   requiresQuote?: unknown;
   bookingEnabled?: unknown;
   active?: unknown;
+  published?: unknown;
+  requiresIntake?: unknown;
+  requires_intake?: unknown;
 
   displayOrder?: unknown;
 };
@@ -221,7 +224,8 @@ export async function PUT(
     .select(`
       id,
       slug,
-      service_type
+      service_type,
+      published
     `)
     .eq("id", id)
     .maybeSingle();
@@ -238,6 +242,13 @@ export async function PUT(
       {
         status: 404,
       },
+    );
+  }
+
+  if (body.requiresIntake !== undefined || body.requires_intake !== undefined) {
+    return NextResponse.json(
+      { error: "La configuración del formulario previo no se puede modificar desde este formulario." },
+      { status: 400 },
     );
   }
 
@@ -405,7 +416,8 @@ export async function PUT(
     typeof body.bookingEnabled !==
       "boolean" ||
     typeof body.active !==
-      "boolean"
+      "boolean" ||
+    (body.published !== undefined && typeof body.published !== "boolean")
   ) {
     return NextResponse.json(
       {
@@ -426,6 +438,8 @@ export async function PUT(
 
   const active =
     body.active;
+
+  const published = body.published ?? currentService.published;
 
   const currency =
     typeof body.currency ===
@@ -568,6 +582,7 @@ export async function PUT(
         bookingEnabled,
 
       active,
+      published,
 
       display_order:
         displayOrder,
@@ -590,6 +605,8 @@ export async function PUT(
       requires_quote,
       booking_enabled,
       active,
+      published,
+      requires_intake,
       display_order
     `)
     .single();
@@ -730,6 +747,8 @@ export async function PATCH(
       requires_quote,
       booking_enabled,
       active,
+      published,
+      requires_intake,
       display_order
     `)
     .single();

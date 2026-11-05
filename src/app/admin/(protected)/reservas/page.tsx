@@ -4,8 +4,8 @@ import ReservationsClient from "@/components/admin/ReservationsClient";
 import BookingFlow from "@/components/publico/reservar/BookingFlow";
 
 import { createClient } from "@/lib/supabase/server";
-import { getActiveServices, type Service } from "@/lib/data/services";
-import { assertStripeCatalogReady, getStripeConfig, getVerifiedStripeContext, verifyImmediatePaymentMethods } from "@/lib/stripe/server";
+import type { Service } from "@/lib/data/services";
+import { assertStripeCatalogReady, getStripeBookingAdmin, getStripeConfig, getVerifiedStripeContext, verifyImmediatePaymentMethods } from "@/lib/stripe/server";
 
 export default async function ReservasPage({ searchParams }: {
   searchParams?: Promise<{ checkoutLiveTest?: string }>;
@@ -19,10 +19,8 @@ export default async function ReservasPage({ searchParams }: {
       if (getStripeConfig().mode !== "live") throw new Error("private_live_test_unavailable");
       const { config, stripe } = await getVerifiedStripeContext({ forNewSale: true, privateLiveTest: true });
       await verifyImmediatePaymentMethods(stripe, config);
-      const catalog = await assertStripeCatalogReady();
-      const serviceIds = new Set(catalog.map((service) => service.id));
-      services = (await getActiveServices()).filter((service) => serviceIds.has(service.id));
-      checkoutEnabled = services.length === catalog.length;
+      services = await assertStripeCatalogReady(getStripeBookingAdmin(), { privateLiveTest: true });
+      checkoutEnabled = true;
     } catch { /* Keep the private form unavailable without exposing provider details. */ }
 
     return (
@@ -66,6 +64,7 @@ export default async function ReservasPage({ searchParams }: {
         session_resolution,
         session_resolution_at,
         finalization_status,
+        requires_intake_snapshot,
         created_at,
         service_name_snapshot,
         duration_minutes_snapshot,

@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     site = config.siteUrl;
     if (request.headers.get("origin") !== site) throw new StripeBookingError("invalid_access");
     let privateLiveTest = false;
+    let privateAdminUserId: string | undefined;
     const testIntent = request.headers.get("x-er-admin-live-test");
     if (testIntent !== null) {
       if (testIntent !== "1" || config.mode !== "live") throw new StripeBookingError("invalid_access");
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
       const admin = await authorizeAdminRequest();
       if (!admin.ok) return respond({ error: admin.error }, admin.status);
       privateLiveTest = true;
+      privateAdminUserId = admin.userId;
     }
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new StripeBookingError("invalid_request");
@@ -106,7 +108,7 @@ export async function POST(request: NextRequest) {
       }
       const context = await getVerifiedStripeContext({ forNewSale: true, ...salesOptions });
       await verifyImmediatePaymentMethods(context.stripe, config);
-      const catalog = await assertStripeCatalogReady(db);
+      const catalog = await assertStripeCatalogReady(db, salesOptions);
       const service = catalog.find((item) => item.slug === body.service.trim());
       if (!service) throw new StripeBookingError("service_unavailable");
       token = request.cookies.get(bookingFlowCookie(body.flowId))?.value;
@@ -125,8 +127,8 @@ export async function POST(request: NextRequest) {
       // never waits for an unrelated Stripe network batch. The exclusion
       // constraint remains the final authority when requests race.
       const processAccess = service.service_type === "package" ? createDurableProcessAccess() : null;
-      const result = await db.rpc("create_stripe_booking_hold_with_legal_v2", {
-        p_service_slug: body.service.trim(), p_starts_at: body.startsAt.trim(),
+      const result = await db.rpc("create_stripe_booking_hold_with_legal_v3", {
+        p_service_id: service.id, p_starts_at: body.startsAt.trim(),
         p_customer_name: body.name.trim(), p_customer_email: body.email.trim().toLowerCase(),
         p_customer_phone: body.phone?.trim() || null, p_notes: body.notes?.trim() || null,
         p_access_token_hash: hash,
@@ -134,6 +136,7 @@ export async function POST(request: NextRequest) {
         p_stripe_mode: config.mode, p_stripe_account_id: config.accountId, p_site_url: site,
         p_process_access_token_hash: processAccess?.tokenHash ?? null,
         p_process_access_token_encrypted: processAccess?.tokenEncrypted ?? null,
+        p_admin_user_id: privateAdminUserId ?? null,
       });
       rpcError(result.error);
       if (!isBookingId(result.data?.booking_id)) throw new StripeBookingError("checkout_unavailable");

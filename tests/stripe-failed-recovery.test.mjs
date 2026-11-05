@@ -49,6 +49,7 @@ before(()=>{
   legacy={h,attempt:attempts(h)[0],booking:booking(h),holdDefinition:pg.sql("SELECT md5(pg_get_functiondef('public.create_stripe_booking_hold_v1(text,timestamptz,text,text,text,text,text)'::regprocedure));")};
   pg.sql(readFileSync(migration,'utf8'));
   for(const extra of liveMigrations.slice(4))pg.sql(readFileSync(extra,'utf8'));
+  pg.sql(readFileSync(new URL('../supabase/migrations/20261104212623_dynamic_services_publication_and_intake.sql',import.meta.url),'utf8'));
   liveReady=true;
 });
 after(()=>pg.stop());
@@ -111,7 +112,7 @@ function service({error=null,saveFailure=null,failureWrite=false,afterSend=null,
       }};
     return query;
   },async rpc(name,args){
-    if(name==='create_stripe_booking_hold_with_legal_v2') {
+    if(name==='create_stripe_booking_hold_with_legal_v3') {
       assert.deepEqual(args.p_legal_acceptance,testModules().load('src/lib/legal/acceptance.ts').currentBookingAcceptance);
       const {p_legal_acceptance}=args;
       const data=rpc(name,args);
@@ -132,7 +133,8 @@ function service({error=null,saveFailure=null,failureWrite=false,afterSend=null,
     if(name==='save_stripe_checkout_v2'&&fail==='after'){fail=null;throw new Error('lost committed response');}
     return {data,error:null};
   }};
-  const modules=testModules({'@/lib/stripe/server':stripeRuntimeFixture(db,stripe),
+  const modules=testModules({'@/lib/stripe/server':{...stripeRuntimeFixture(db,stripe),
+    assertStripeCatalogReady:async()=>json('SELECT jsonb_agg(to_jsonb(s)) FROM public.services s WHERE active AND published')},
     'next/server':{NextResponse:{json:(data,init={})=>({data,status:init.status??200,cookies:{saved:[],set(...args){this.saved.push(args);}}})}},
     '@/lib/bookings/finalize-paid-booking':{finalizePaidBooking:async()=>{throw new Error('Unpaid failed-recovery test must never finalize');}},
     '@/lib/bookings/intake-destination':{bookingIntakeDestination:async(owned)=>{assert.equal(owned.payment_status,'pending');return {status:'waiting',redirectIntakeUrl:null};}},

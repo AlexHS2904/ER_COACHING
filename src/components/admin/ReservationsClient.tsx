@@ -18,6 +18,7 @@ type Booking = {
   session_resolution?: string | null;
   session_resolution_at?: string | null;
   finalization_status?: string | null;
+  requires_intake_snapshot?: boolean | null;
   booking_reference: string | null;
   payment_status: string;
 
@@ -1168,6 +1169,7 @@ export default function ReservationsClient({
               </div>
 
               <BookingPaymentPanel
+                requiresIntakeSnapshot={selectedBooking.requires_intake_snapshot}
                 bookingId={
                   selectedBooking.id
                 }

@@ -33,6 +33,8 @@ export default async function AdminServicesPage() {
       requires_quote,
       booking_enabled,
       active,
+      published,
+      requires_intake,
       display_order
     `)
     .order(
@@ -99,6 +101,12 @@ export default async function AdminServicesPage() {
 
         active:
           service.active,
+
+        published:
+          service.published,
+
+        requires_intake:
+          service.requires_intake,
 
         display_order:
           service.display_order,

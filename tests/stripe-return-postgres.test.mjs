@@ -9,14 +9,15 @@ import { localSupabaseQuery } from './helpers/local-supabase-query.mjs';
 import { stripeCheckoutTransport } from './helpers/stripe-checkout-transport.mjs';
 import { testModules } from './helpers/load-typescript.mjs';
 
-// All six unchanged migration files run in a disposable Unix-socket PostgreSQL
+// Applied migrations plus the pending additive migration run in a disposable Unix-socket PostgreSQL
 // cluster. No Docker, environment files, remote database, Stripe network,
 // Calendar network or email provider is used by these integration tests.
 const pg=localPostgres(),Stripe=createRequire(import.meta.url)('stripe');
 const site='http://localhost:3000',webhookSecret='whsec_fixture_only';
 const env={INTAKE_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,13).toString('base64'),
   RESEND_FROM_EMAIL:'sender@example.test',COACH_EMAIL:'coach@example.test',STRIPE_WEBHOOK_SECRET:webhookSecret};
-before(()=>pg.start(liveFixture,liveMigrations));
+before(()=>pg.start(liveFixture,[...liveMigrations,
+  new URL('../supabase/migrations/20261104212623_dynamic_services_publication_and_intake.sql',import.meta.url)]));
 after(()=>pg.stop());
 const rows=sql=>JSON.parse(pg.sql(sql)||'null');
 const literal=value=>`'${String(value).replaceAll("'","''")}'`;
@@ -144,7 +145,7 @@ function assertCompleted(f,h) {
   assert.equal(pg.sql(`SELECT count(*) FROM public.bookings WHERE booking_reference=${literal(b.booking_reference)}`),'1');
 }
 
-test('all six unchanged migrations support an atomic legal hold and paid return before webhook with real SQL finalization',async()=>{
+test('applied and pending migrations support an atomic legal hold and paid return before webhook with real SQL finalization',async()=>{
   const f=fixture(),h=await openBooking(f);
   assert.equal(events(h.id).length,0);assert.equal(intakes(h.id).length,0);
   const event=completeSession(f,h);

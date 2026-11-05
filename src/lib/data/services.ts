@@ -19,6 +19,8 @@ export type Service = {
   booking_enabled: boolean;
 
   active: boolean;
+  published: boolean;
+  requires_intake: boolean;
   display_order: number;
 };
 
@@ -41,8 +43,12 @@ export async function getActiveServices(): Promise<Service[]> {
       requires_quote,
       booking_enabled,
       active,
+      published,
+      requires_intake,
       display_order
     `)
+    .eq("active", true)
+    .eq("published", true)
     .order("display_order", { ascending: true });
 
   if (error) {
@@ -50,5 +56,8 @@ export async function getActiveServices(): Promise<Service[]> {
     throw new Error("No fue posible cargar los servicios.");
   }
 
-  return data ?? [];
+  return (data ?? []).filter((service) =>
+    service.active === true && service.published === true &&
+    typeof service.requires_intake === "boolean",
+  );
 }

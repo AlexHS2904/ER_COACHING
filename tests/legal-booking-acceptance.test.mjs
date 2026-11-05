@@ -1,4 +1,4 @@
-import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope } from './helpers/stripe-runtime-fixture.mjs';
+import { stripeRuntimeFixture, stripeFixtureConfig, stripeFixtureScope, stripeFixtureCatalog } from './helpers/stripe-runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { testModules } from './helpers/load-typescript.mjs';
@@ -97,9 +97,10 @@ test('accepted request creates the hold with unchanged business fields and then 
   assert.equal(result.status, 200);
   assert.equal(result.data.bookingId, bookingId);
   assert.equal(f.calls.includes('expire'), false, 'Checkout must leave expiration batches to the worker');
-  assert.equal(f.calls[0].name, 'create_stripe_booking_hold_with_legal_v2');
+  assert.equal(f.calls[0].name, 'create_stripe_booking_hold_with_legal_v3');
   assert.equal(f.calls[0].args.p_starts_at, input.startsAt);
-  assert.equal(f.calls[0].args.p_service_slug, input.service);
+  assert.equal(f.calls[0].args.p_service_id, stripeFixtureCatalog[0].id);
+  assert.equal(f.calls[0].args.p_admin_user_id, null);
   assert.equal(f.calls[0].args.p_customer_email, input.email);
   assert.equal(f.calls[1].checkout, bookingId);
   assert.deepEqual(f.calls[0].args.p_legal_acceptance, accepted);

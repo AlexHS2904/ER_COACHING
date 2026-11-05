@@ -309,6 +309,7 @@ const [
         const response = await fetch(
           `/api/availability?${params.toString()}`,
           {
+            ...(privateLiveTest ? { headers: { "X-ER-Admin-Live-Test": "1" } } : {}),
             signal:
               controller.signal,
           },
@@ -350,6 +351,7 @@ const [
   }, [
     selectedService,
     selectedDate,
+    privateLiveTest,
   ]);
 
   /* =======================================================

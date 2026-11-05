@@ -9,12 +9,14 @@ export async function bookingIntakeDestination(booking: {
   payment_status: string; payment_flow: string | null; finalization_status: string | null;
   process_id?: string | null; stripe_mode?: string | null; stripe_account_id?: string | null;
   stripe_site_origin?: string | null;
-}, accessToken: unknown): Promise<{ status: "waiting" | "submitted" | "available" | "unavailable"; redirectIntakeUrl: string | null }> {
+  requires_intake_snapshot?: boolean | null;
+}, accessToken: unknown): Promise<{ status: "waiting" | "submitted" | "available" | "unavailable" | "not_required"; redirectIntakeUrl: string | null }> {
   if (!hasBookingAccess(accessToken, booking.booking_access_token_hash) ||
       booking.payment_flow !== "stripe" || booking.payment_status !== "paid" ||
       booking.status !== "confirmed" || booking.finalization_status !== "completed") {
     return { status: "waiting", redirectIntakeUrl: null };
   }
+  if (booking.requires_intake_snapshot === false) return { status: "not_required", redirectIntakeUrl: null };
   try {
     const db = getStripeBookingAdmin();
     let purchaseBookingId = booking.id;

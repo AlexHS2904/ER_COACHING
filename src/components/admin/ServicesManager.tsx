@@ -49,6 +49,8 @@ export type AdminService = {
     boolean;
 
   active: boolean;
+  published: boolean;
+  requires_intake: boolean;
 
   display_order:
     number;
@@ -85,6 +87,9 @@ type ServiceForm = {
     boolean;
 
   active:
+    boolean;
+
+  published:
     boolean;
 
   displayOrder:
@@ -211,6 +216,9 @@ function createEditForm(
     active:
       service.active,
 
+    published:
+      service.published,
+
     displayOrder:
       String(
         service.display_order,
@@ -252,6 +260,9 @@ function createNewForm(
       true,
 
     active:
+      true,
+
+    published:
       true,
 
     displayOrder:
@@ -641,6 +652,9 @@ export default function ServicesManager({
 
         active:
           form.active,
+
+        published:
+          form.published,
 
         displayOrder:
           Number(
@@ -1631,7 +1645,7 @@ export default function ServicesManager({
                 <div className="mt-5 space-y-3">
                   <ToggleRow
                     label="Servicio activo"
-                    description="El servicio puede mostrarse a los clientes."
+                    description="Habilita el servicio; su visibilidad depende de la publicación."
                     checked={
                       form.active
                     }
@@ -1643,6 +1657,13 @@ export default function ServicesManager({
                         value,
                       )
                     }
+                  />
+
+                  <ToggleRow
+                    label="Publicado en el catálogo"
+                    description="Desactívalo para reservar este servicio solo desde el acceso administrativo privado."
+                    checked={form.published}
+                    onChange={(value) => updateForm("published", value)}
                   />
 
                   <ToggleRow
@@ -1674,6 +1695,11 @@ export default function ServicesManager({
                       toggleQuote
                     }
                   />
+                  <p className="text-sm leading-6 text-brand-brown/55">
+                    Formulario previo: {editing?.requires_intake
+                      ? "obligatorio para el coaching 1:1 actual."
+                      : "no requerido para este servicio."}
+                  </p>
                 </div>
               </div>
 
@@ -1874,6 +1900,10 @@ function ServiceCard({
               {archived
                 ? "Archivado"
                 : "Activo"}
+            </span>
+
+            <span className="rounded-full bg-brand-cream px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-brown/55">
+              {service.published ? "Publicado" : "Privado"}
             </span>
 
             <span

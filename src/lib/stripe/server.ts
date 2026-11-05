@@ -2,6 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { toStripeMinorUnits } from "@/lib/stripe/money";
+import type { Service } from "@/lib/data/services";
 
 export type StripeMode = "test" | "live";
 export type StripeRuntimeScope = { mode: StripeMode; accountId: string };
@@ -115,17 +116,20 @@ export async function verifyImmediatePaymentMethods(stripe: Stripe, config: Stri
 
 // Both launch products must be available together. Public data and a sales flag
 // alone cannot silently launch only the individual product.
-export async function assertStripeCatalogReady(db = getSupabaseAdmin()) {
+export async function assertStripeCatalogReady(db = getSupabaseAdmin(), options: { privateLiveTest?: boolean } = {}): Promise<Service[]> {
   const result = await db.from("services")
-    .select("id,slug,service_type,session_count,duration_minutes,price,currency,active,booking_enabled,requires_quote");
+    .select("id,slug,name,short_description,description,display_order,service_type,session_count,duration_minutes,price,currency,active,published,requires_intake,booking_enabled,requires_quote");
   if (result.error) throw new Error("stripe_catalog_unavailable");
   const eligible = (result.data ?? []).filter((s) => s.active === true && s.booking_enabled === true &&
+    typeof s.published === "boolean" && typeof s.requires_intake === "boolean" &&
+    (s.published === true || options.privateLiveTest === true) &&
     s.requires_quote === false && s.currency === "MXN" && Number.isInteger(s.duration_minutes) && s.duration_minutes > 0);
-  const singles = eligible.filter((s) => s.slug === "sesion-1-1" && s.service_type === "single" && s.session_count === 1);
+  const singles = eligible.filter((s) => s.service_type === "single" && s.session_count === 1);
   const packages = eligible.filter((s) => s.service_type === "package" && s.session_count === 6 && s.duration_minutes === 90);
-  if (singles.length !== 1 || packages.length !== 1) throw new Error("stripe_catalog_unavailable");
-  for (const service of [singles[0], packages[0]]) toStripeMinorUnits(service.price, service.currency);
-  return [singles[0], packages[0]];
+  if (singles.length < 1 || packages.length !== 1) throw new Error("stripe_catalog_unavailable");
+  const catalog = [...singles, packages[0]];
+  for (const service of catalog) toStripeMinorUnits(service.price, service.currency);
+  return catalog as Service[];
 }
 // Ownership is checked by callers; completed historical reads need no Stripe config.
 export function getStripeBookingAdmin() { return getSupabaseAdmin(); }

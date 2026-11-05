@@ -31,7 +31,7 @@ function legacyBookingFixture({ service, checkoutEnabled = false, createdBooking
         eq() { return this; },
         async maybeSingle() {
           calls.push({ read: table });
-          return { data: table === "services" ? service : null, error: null };
+          return { data: table === "services" ? {published:true,...service} : null, error: null };
         },
         async single() {
           calls.push({ read: table });

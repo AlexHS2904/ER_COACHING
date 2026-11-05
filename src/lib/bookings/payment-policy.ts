@@ -19,7 +19,6 @@ export function serviceRequiresPayment(price: unknown): boolean {
 export function supportsPublicStripeCheckout(service: BookableServicePayment): boolean {
   if (service.requires_quote === true) return false;
   return (service.service_type === "single" &&
-    service.slug === "sesion-1-1" &&
     service.session_count === 1) || (service.service_type === "package" && service.session_count === 6);
 }
 

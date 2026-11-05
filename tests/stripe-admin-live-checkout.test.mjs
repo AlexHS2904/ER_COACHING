@@ -28,7 +28,7 @@ function fixture({ role = 'active', env = {}, account = {}, methods = {}, catalo
       return { select: async () => ({ data: structuredClone(catalog), error: null }) };
     },
     async rpc(name, args) {
-      assert.equal(name, 'create_stripe_booking_hold_with_legal_v2');
+      assert.equal(name, 'create_stripe_booking_hold_with_legal_v3');
       calls.holds.push(args);
       return { data: { booking_id: bookingId, booking_reference: 'PRIVATE-FIXTURE', payment_expires_at: '2035-01-01T12:30:00Z' }, error: null };
     },
@@ -142,7 +142,9 @@ for (const service of ['sesion-1-1', 'proceso']) {
     assert.equal(f.calls.account, 2); assert.equal(f.calls.methods, 2);
     const args = f.calls.holds[0];
     assert.equal(args.p_stripe_mode, 'live'); assert.equal(args.p_stripe_account_id, 'acct_fixture');
-    assert.equal(args.p_service_slug, service); assert.deepEqual(args.p_legal_acceptance, f.body().legalAcceptance);
+    assert.equal(args.p_service_id, stripeFixtureCatalog.find(item => item.slug === service).id);
+    assert.equal(args.p_admin_user_id, adminId);
+    assert.equal(args.p_service_slug, undefined); assert.deepEqual(args.p_legal_acceptance, f.body().legalAcceptance);
     assert.equal(Object.hasOwn(args, 'amount_minor'), false);
     assert.equal(Boolean(args.p_process_access_token_encrypted), service === 'proceso');
     assert.equal(f.calls.checkouts[0][0], bookingId);
@@ -197,4 +199,30 @@ test('provider failures in private Checkout never expose credentials or provider
   assert.equal(response.status, 409); assert.equal(response.data.code, 'checkout_unavailable');
   const output = JSON.stringify({ response: response.data, logs: f.logs });
   for (const value of [token, liveEnv.STRIPE_SECRET_KEY, liveEnv.STRIPE_WEBHOOK_SECRET, liveEnv.STRIPE_WORKER_SECRET, 'private provider error']) assert.equal(output.includes(value), false);
+});
+
+const hiddenService = { ...stripeFixtureCatalog[0], id: '44444444-4444-4444-8444-444444444444',
+  slug: 'technical-private', price: 10, published: false, requires_intake: false };
+test('active admin can select a hidden dynamic single using its trusted ID without package credentials', async () => {
+  const f = fixture({ catalog: [...stripeFixtureCatalog, hiddenService] });
+  const result = await f.run({ payload: f.body({ service: hiddenService.slug }) });
+  assert.equal(result.status, 200);
+  assert.equal(f.calls.holds.length, 1);
+  assert.equal(f.calls.holds[0].p_service_id, hiddenService.id);
+  assert.equal(f.calls.holds[0].p_admin_user_id, adminId);
+  assert.equal(f.calls.holds[0].p_process_access_token_hash, null);
+  assert.equal(f.calls.holds[0].p_process_access_token_encrypted, null);
+  assert.equal(Object.hasOwn(f.calls.holds[0], 'price'), false);
+  assert.equal(f.runtime.isStripeCheckoutEnabled(), false);
+});
+test('hidden service stays inaccessible through public Checkout even when public sales are enabled', async () => {
+  const f = fixture({ env: { PAID_BOOKINGS_ENABLED: 'true' }, catalog: [...stripeFixtureCatalog, hiddenService] });
+  const result = await f.run({ privateIntent: null, payload: f.body({ service: hiddenService.slug }) });
+  assert.equal(result.status, 409);
+  assert.equal(f.calls.holds.length, 0); assert.equal(f.calls.checkouts.length, 0);
+});
+test('inactive dynamic service remains unavailable even to the authorized private flow', async () => {
+  const f = fixture({ catalog: [...stripeFixtureCatalog, { ...hiddenService, active: false }] });
+  const result = await f.run({ payload: f.body({ service: hiddenService.slug }) });
+  assert.equal(result.status, 409); assert.equal(f.calls.holds.length, 0);
 });

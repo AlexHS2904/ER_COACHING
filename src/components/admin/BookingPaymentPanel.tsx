@@ -20,13 +20,16 @@ type Props = {
 
   initialPaymentStatus:
     string;
+  requiresIntakeSnapshot?: boolean | null;
 };
 
 export default function BookingPaymentPanel({
   bookingId,
   serviceName,
   initialPaymentStatus,
+  requiresIntakeSnapshot,
 }: Props) {
+  const requiresIntake = requiresIntakeSnapshot ?? (serviceName === "Sesión 1:1");
   const router =
     useRouter();
 
@@ -106,7 +109,7 @@ export default function BookingPaymentPanel({
 
   useEffect(() => {
     if (
-      initialPaymentStatus !==
+      !requiresIntake || initialPaymentStatus !==
       "paid"
     ) {
       return;
@@ -209,11 +212,11 @@ export default function BookingPaymentPanel({
   }, [
     bookingId,
     initialPaymentStatus,
+    requiresIntake,
   ]);
 
   if (
-    serviceName !==
-    "Sesión 1:1"
+    !requiresIntake
   ) {
     return null;
   }

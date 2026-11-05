@@ -25,7 +25,7 @@ export default async function BookingConfirmationPage({ searchParams }: {
   try {
     const db = isBookingId(params.booking) ? getStripeBookingAdmin() : getSupabaseAdmin();
     const query = db.from("bookings").select(
-      "id,booking_reference,status,payment_status,payment_flow,finalization_status,expired_at,payment_expires_at,booking_access_token_hash,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at",
+      "id,booking_reference,status,payment_status,payment_flow,finalization_status,expired_at,payment_expires_at,booking_access_token_hash,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at,requires_intake_snapshot",
     );
     const result = isBookingId(params.booking)
       ? await query.eq("id", params.booking).maybeSingle()

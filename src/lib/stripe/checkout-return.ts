@@ -8,7 +8,7 @@ import { applyStripeCheckoutEvent } from "@/lib/stripe/webhook";
 import { finalizePaidBooking } from "@/lib/bookings/finalize-paid-booking";
 import { bookingIntakeDestination } from "@/lib/bookings/intake-destination";
 
-const BOOKING_COLUMNS = "id,process_id,package_session_number,stripe_mode,stripe_account_id,stripe_site_origin,booking_reference,created_at,status,payment_status,payment_flow,finalization_status,next_finalization_at,expired_at,payment_expires_at,booking_access_token_hash,price_snapshot,currency_snapshot,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at";
+const BOOKING_COLUMNS = "id,process_id,package_session_number,stripe_mode,stripe_account_id,stripe_site_origin,booking_reference,created_at,status,payment_status,payment_flow,finalization_status,next_finalization_at,expired_at,payment_expires_at,booking_access_token_hash,price_snapshot,currency_snapshot,legal_terms_accepted_at,legal_terms_version,legal_privacy_notice_version,legal_adult_confirmed_at,requires_intake_snapshot";
 const MAX_EVENT_PAGES = 3;
 
 export type OwnedStripeBooking = {
@@ -34,6 +34,7 @@ export type OwnedStripeBooking = {
   legal_terms_version: string | null;
   legal_privacy_notice_version: string | null;
   legal_adult_confirmed_at: string | null;
+  requires_intake_snapshot: boolean | null;
 };
 
 type ReturnAttempt = {

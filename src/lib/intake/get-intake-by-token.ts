@@ -105,6 +105,7 @@ export async function getIntakeByToken(
         paid_at: string | null;
         stripe_mode: string | null;
         stripe_account_id: string | null;
+        requires_intake_snapshot: boolean | null;
       }
     | null =
     null;
@@ -132,7 +133,7 @@ export async function getIntakeByToken(
           status,
           payment_status,
           process_id, package_session_number, payment_flow, payment_provider, payment_reference, paid_at,
-          stripe_mode, stripe_account_id
+          stripe_mode, stripe_account_id, requires_intake_snapshot
         `,
       )
       .eq(
@@ -164,6 +165,9 @@ export async function getIntakeByToken(
 
     booking =
       bookingData;
+    // A stray historical/admin-created form cannot make an explicit opt-out
+    // eligible. Manual invitations remain independent of bookings.
+    if (bookingData.requires_intake_snapshot === false) return null;
   }
 
   /* =====================================================

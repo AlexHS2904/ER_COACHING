@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getAvailableSlots } from "@/lib/data/availability";
+import { getAvailableSlots, getAdminAvailableSlots } from "@/lib/data/availability";
 import { enforcePublicAbuse } from "@/lib/security/public-abuse";
 
 export async function GET(request: NextRequest) {
@@ -37,16 +37,30 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const slots = await getAvailableSlots(
-      service,
-      date,
-    );
+    let adminUserId: string | undefined;
+    const testIntent = request.headers.get("x-er-admin-live-test");
+    if (testIntent !== null) {
+      if (testIntent !== "1") return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+      const { getStripeConfig } = await import("@/lib/stripe/server");
+      const config = getStripeConfig();
+      if (config.mode !== "live" || request.nextUrl.origin !== config.siteUrl ||
+          (request.headers.get("origin") !== null && request.headers.get("origin") !== config.siteUrl)) {
+        return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+      }
+      const { authorizeAdminRequest } = await import("@/lib/admin/authorize-admin");
+      const admin = await authorizeAdminRequest();
+      if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status });
+      adminUserId = admin.userId;
+    }
+    const slots = adminUserId
+      ? await getAdminAvailableSlots(service, date, adminUserId)
+      : await getAvailableSlots(service, date);
 
     return NextResponse.json({
       service,
       date,
       slots,
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error(error);
 

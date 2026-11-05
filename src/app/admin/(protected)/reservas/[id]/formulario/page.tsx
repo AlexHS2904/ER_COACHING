@@ -202,7 +202,8 @@ export default async function AdminIntakePage({
         customer_email,
         service_name_snapshot,
         starts_at,
-        payment_status
+        payment_status,
+        requires_intake_snapshot
       `,
     )
     .eq(
@@ -211,7 +212,7 @@ export default async function AdminIntakePage({
     )
     .maybeSingle();
 
-  if (!booking) {
+  if (!booking || booking.requires_intake_snapshot === false) {
     notFound();
   }
 

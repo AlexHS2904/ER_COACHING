@@ -326,6 +326,7 @@ export async function POST(
           slug,
           name,
           booking_enabled,
+          published,
           requires_quote,
           price,
           session_count
@@ -362,7 +363,7 @@ export async function POST(
     }
 
     if (
-      !service.booking_enabled ||
+      service.published !== true || !service.booking_enabled ||
       service.requires_quote
     ) {
       return NextResponse.json(
